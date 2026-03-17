@@ -1,0 +1,195 @@
+{
+  "compute": {
+    "virtual_machines": {
+      "name": "Azure Virtual Machines",
+      "description": "IaaS compute for lift-and-shift or custom workloads",
+      "sku_families": ["B-series", "D-series", "E-series", "F-series"],
+      "use_for": ["rehost", "retain"],
+      "pricing_meter": "Virtual Machines"
+    },
+    "app_service": {
+      "name": "Azure App Service",
+      "description": "PaaS for web apps, APIs, and mobile backends",
+      "tiers": ["Free", "Basic", "Standard", "Premium v3"],
+      "use_for": ["refactor"],
+      "pricing_meter": "Azure App Service"
+    },
+    "aks": {
+      "name": "Azure Kubernetes Service",
+      "description": "Managed Kubernetes for containerized microservices",
+      "use_for": ["rearchitect", "rebuild"],
+      "pricing_meter": "Azure Kubernetes Service"
+    },
+    "container_apps": {
+      "name": "Azure Container Apps",
+      "description": "Serverless containers for event-driven microservices",
+      "use_for": ["rearchitect", "rebuild"],
+      "pricing_meter": "Azure Container Apps"
+    },
+    "functions": {
+      "name": "Azure Functions",
+      "description": "Serverless compute for event-driven processing",
+      "tiers": ["Consumption", "Premium", "Dedicated"],
+      "use_for": ["rearchitect", "rebuild"],
+      "pricing_meter": "Functions"
+    }
+  },
+  "database": {
+    "azure_sql": {
+      "name": "Azure SQL Database",
+      "description": "Managed SQL Server database",
+      "tiers": ["Basic", "Standard", "Premium", "General Purpose", "Business Critical", "Hyperscale"],
+      "use_for": ["refactor"],
+      "pricing_meter": "SQL Database"
+    },
+    "sql_managed_instance": {
+      "name": "Azure SQL Managed Instance",
+      "description": "Full SQL Server compatibility with PaaS benefits",
+      "use_for": ["refactor"],
+      "pricing_meter": "SQL Managed Instance"
+    },
+    "cosmos_db": {
+      "name": "Azure Cosmos DB",
+      "description": "Globally distributed multi-model NoSQL database",
+      "use_for": ["rearchitect", "rebuild"],
+      "pricing_meter": "Azure Cosmos DB"
+    },
+    "postgresql_flexible": {
+      "name": "Azure Database for PostgreSQL - Flexible Server",
+      "description": "Managed PostgreSQL with flexible scaling",
+      "use_for": ["refactor", "rearchitect"],
+      "pricing_meter": "Azure Database for PostgreSQL"
+    },
+    "mysql_flexible": {
+      "name": "Azure Database for MySQL - Flexible Server",
+      "description": "Managed MySQL with flexible scaling",
+      "use_for": ["refactor"],
+      "pricing_meter": "Azure Database for MySQL"
+    }
+  },
+  "storage": {
+    "blob": {
+      "name": "Azure Blob Storage",
+      "description": "Object storage for unstructured data",
+      "tiers": ["Hot", "Cool", "Cold", "Archive"],
+      "use_for": ["refactor", "rearchitect"],
+      "pricing_meter": "Storage"
+    },
+    "files": {
+      "name": "Azure Files",
+      "description": "Managed file shares accessible via SMB and NFS",
+      "tiers": ["Premium", "Transaction Optimized", "Hot", "Cool"],
+      "use_for": ["rehost", "refactor"],
+      "pricing_meter": "Azure Files"
+    },
+    "data_lake": {
+      "name": "Azure Data Lake Storage Gen2",
+      "description": "Scalable analytics storage built on Blob Storage",
+      "use_for": ["rearchitect"],
+      "pricing_meter": "Storage"
+    }
+  },
+  "networking": {
+    "vnet": {
+      "name": "Azure Virtual Network",
+      "description": "Isolated network for Azure resources"
+    },
+    "firewall": {
+      "name": "Azure Firewall",
+      "description": "Cloud-native network security",
+      "tiers": ["Standard", "Premium"],
+      "pricing_meter": "Azure Firewall"
+    },
+    "bastion": {
+      "name": "Azure Bastion",
+      "description": "Secure RDP/SSH access without public IPs",
+      "pricing_meter": "Azure Bastion"
+    },
+    "front_door": {
+      "name": "Azure Front Door",
+      "description": "Global load balancer with WAF and CDN",
+      "tiers": ["Standard", "Premium"],
+      "pricing_meter": "Azure Front Door Service"
+    },
+    "application_gateway": {
+      "name": "Azure Application Gateway",
+      "description": "Regional L7 load balancer with WAF",
+      "tiers": ["Standard v2", "WAF v2"],
+      "pricing_meter": "Application Gateway"
+    },
+    "expressroute": {
+      "name": "Azure ExpressRoute",
+      "description": "Private dedicated connection from on-premises to Azure",
+      "pricing_meter": "ExpressRoute"
+    },
+    "vpn_gateway": {
+      "name": "Azure VPN Gateway",
+      "description": "Encrypted connection from on-premises to Azure over internet",
+      "pricing_meter": "VPN Gateway"
+    }
+  },
+  "security": {
+    "key_vault": {
+      "name": "Azure Key Vault",
+      "description": "Secrets, keys, and certificate management",
+      "pricing_meter": "Key Vault"
+    },
+    "defender": {
+      "name": "Microsoft Defender for Cloud",
+      "description": "Cloud security posture management and threat protection"
+    },
+    "sentinel": {
+      "name": "Microsoft Sentinel",
+      "description": "Cloud-native SIEM and SOAR",
+      "pricing_meter": "Sentinel"
+    },
+    "entra_id": {
+      "name": "Microsoft Entra ID",
+      "description": "Identity and access management",
+      "tiers": ["Free", "P1", "P2"]
+    }
+  },
+  "monitoring": {
+    "monitor": {
+      "name": "Azure Monitor",
+      "description": "Full-stack monitoring for applications and infrastructure"
+    },
+    "log_analytics": {
+      "name": "Azure Log Analytics",
+      "description": "Centralized log ingestion and querying",
+      "pricing_meter": "Log Analytics"
+    }
+  },
+  "migration_tools": {
+    "azure_migrate": {
+      "name": "Azure Migrate",
+      "description": "Discovery, assessment, and migration of on-premises workloads"
+    },
+    "database_migration_service": {
+      "name": "Azure Database Migration Service",
+      "description": "Managed database migration to Azure"
+    }
+  },
+  "workload_mappings": {
+    ".net_monolith": ["app_service", "azure_sql"],
+    ".net_microservices": ["aks", "azure_sql"],
+    "java_monolith": ["app_service", "postgresql_flexible"],
+    "java_microservices": ["aks", "postgresql_flexible"],
+    "java_vm_based": ["virtual_machines", "postgresql_flexible"],
+    "node_web_app": ["app_service", "cosmos_db"],
+    "python_web_app": ["app_service", "postgresql_flexible"],
+    "legacy_cobol": ["replace_with_saas"],
+    "legacy_mainframe": ["replace_with_saas"],
+    "file_shares": ["files"],
+    "medical_imaging": ["blob"],
+    "data_warehouse": ["data_lake"],
+    "saas_already": ["retain"],
+    "static_website": ["blob"],
+    "wordpress": ["app_service", "mysql_flexible"],
+    "sql_server_db": ["azure_sql"],
+    "oracle_db": ["postgresql_flexible"],
+    "mysql_db": ["mysql_flexible"],
+    "postgresql_db": ["postgresql_flexible"],
+    "mongodb": ["cosmos_db"]
+  }
+}
