@@ -1,0 +1,55 @@
+Company: MediTrack Health Solutions
+Industry: Healthcare
+Employees: 200
+Compliance: HIPAA required
+
+Current Infrastructure:
+- 2 on-premises data centers (Dallas, Chicago)
+- Active Directory for identity
+- VMware vSphere managing 60 VMs
+
+Applications:
+1. Patient Portal (public-facing)
+   - .NET Framework 4.8 monolith
+   - SQL Server 2016 database (2TB)
+   - 15,000 daily active users
+   - SLA: 99.9% uptime required
+
+2. Electronic Health Records (EHR) System
+   - Java-based, runs on 8 VMs
+   - Oracle Database 19c (5TB)
+   - Used by 500 staff daily
+   - Integrates with 3 external lab systems via HL7/FHIR APIs
+
+3. Internal HR & Payroll
+   - Off-the-shelf SAP SuccessFactors (SaaS)
+   - Connected to on-prem AD for SSO
+
+4. Medical Imaging Storage (PACS)
+   - 50TB of DICOM images
+   - Accessed by 80 radiologists
+   - Requires low-latency access
+
+5. Legacy Billing System
+   - COBOL-based, runs on an IBM AS/400
+   - 20 years old, 2 people know how it works
+   - Processes 10,000 claims/month
+
+6. Internal Wiki & File Shares
+   - Confluence on a VM
+   - 3TB of shared files on Windows file server
+
+7. Dev/Test Environments
+   - 12 VMs for development and QA
+   - No production traffic
+
+Team:
+- 1 IT Director
+- 3 System Administrators (Windows/Linux)
+- 2 Network Engineers
+- 1 Security Analyst
+- 8 Developers (.NET and Java)
+- No cloud experience on the team
+
+Budget: $800K for migration, $30K/month target for ongoing cloud costs
+Timeline: Want to be migrated within 12 months

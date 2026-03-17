@@ -1,0 +1,76 @@
+Company: Contoso Manufacturing
+Industry: Manufacturing
+Employees: 1,200
+Compliance: ISO 27001, SOC2
+
+Current Infrastructure:
+- 1 primary data center (Detroit), 1 DR site (Austin)
+- Cisco network infrastructure with MPLS between sites
+- Active Directory with 3 domain controllers
+- NetApp SAN storage (100TB)
+- 150 VMs on VMware vSphere 7
+
+Applications:
+1. ERP System (SAP S/4HANA)
+   - Runs on 12 VMs
+   - SAP HANA database (8TB)
+   - 800 daily users across 4 plants
+   - Mission-critical, 99.99% SLA
+   - Integrates with shop floor systems via OPC-UA
+
+2. Manufacturing Execution System (MES)
+   - Custom .NET application
+   - SQL Server 2019 database (500GB)
+   - Real-time integration with PLC controllers on factory floor
+   - Latency-sensitive (< 50ms required)
+
+3. Supply Chain Management
+   - Oracle-based custom application
+   - Oracle 19c database (2TB)
+   - Used by procurement and logistics teams
+   - EDI integrations with 50+ suppliers
+
+4. Quality Management System (QMS)
+   - Document-heavy, .NET web app
+   - SQL Server 2017 (200GB)
+   - Audit trail required for ISO compliance
+
+5. Customer Portal
+   - React frontend, Node.js backend
+   - MongoDB (100GB)
+   - 5,000 daily users
+   - Already containerized with Docker
+
+6. Business Intelligence / Reporting
+   - SQL Server Reporting Services (SSRS)
+   - Power BI connected to data warehouse
+   - 3TB data warehouse on SQL Server
+
+7. Email & Collaboration
+   - Microsoft 365 (already in cloud)
+   - SharePoint Online for document management
+
+8. Legacy Plant Monitoring
+   - Windows XP workstations running SCADA software
+   - Cannot be moved to cloud (hardware dependency)
+   - Connects to PLCs via serial/Modbus
+
+9. HR System
+   - Workday (SaaS)
+   - Azure AD SSO already configured
+
+10. Dev/Test/Staging
+    - 30 VMs for development and testing
+    - CI/CD with Jenkins on-prem
+
+Team:
+- 1 CTO, 1 VP of IT
+- 5 System Administrators
+- 3 Network Engineers
+- 2 Security Engineers (one has AZ-500)
+- 2 DBAs (SQL Server, Oracle)
+- 15 Developers (.NET, Node.js, React)
+- 1 DevOps Engineer (some Azure experience)
+
+Budget: $2M for migration over 18 months, $80K/month target ongoing
+Timeline: 18 months, with Phase 1 complete in 6 months

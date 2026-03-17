@@ -1,0 +1,48 @@
+Company: TaskFlow.io
+Industry: SaaS / Technology
+Employees: 25
+Compliance: SOC2 (in progress), GDPR (EU customers)
+
+Current Infrastructure:
+- No data centers, everything hosted on AWS
+- AWS account managed by 1 person
+
+Applications:
+1. TaskFlow Web App (main product)
+   - React frontend on CloudFront/S3
+   - Python Django backend on EC2 (3 instances)
+   - PostgreSQL on RDS (500GB)
+   - Redis on ElastiCache
+   - 20,000 daily active users
+   - SLA: 99.9% to customers
+
+2. API Platform
+   - Python FastAPI on EC2 (2 instances)
+   - Shared PostgreSQL with main app
+   - REST + WebSocket connections
+   - 500 API partners
+
+3. Background Job Processor
+   - Python Celery workers on EC2
+   - RabbitMQ on Amazon MQ
+   - Processes 1M jobs/day
+
+4. Analytics Pipeline
+   - Python scripts on EC2
+   - Data stored in S3 (2TB)
+   - Redshift for analytics queries
+
+5. Marketing Website
+   - WordPress on Lightsail
+   - Separate from main product
+
+Team:
+- 1 CTO (full-stack, manages all infra)
+- 1 Senior Backend Developer
+- 3 Full-Stack Developers
+- 1 DevOps/SRE (just hired, no Azure experience)
+- All have AWS experience, none have Azure experience
+
+Budget: $150K for migration, $15K/month target (currently paying $12K/month on AWS)
+Timeline: 6 months, want minimal downtime
+Reason for migration: Company acquired by Azure-first enterprise, need to consolidate on Azure
