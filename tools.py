@@ -447,6 +447,178 @@ async def classify_workloads(caf_input: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+async def plan_migration_waves(
+    classified: list[dict[str, Any]],
+    timeline_months: int = 12,
+) -> list[dict[str, Any]]:
+    """Group classified workloads into migration waves.
+
+    Uses LLM with wave planning rules from CAF methodology.
+    """
+    if not classified:
+        return []
+
+    from knowledge.caf_prompts import PLAN_PROMPT
+
+    user_content = json.dumps({
+        "classified_workloads": classified,
+        "timeline_months": timeline_months,
+    }, indent=2)
+
+    try:
+        result = await _llm_call(PLAN_PROMPT, user_content)
+    except Exception as exc:
+        logger.debug("[PLAN] Wave planning failed: %s", exc)
+        return []
+
+    waves = result.get("migration_waves", [])
+    if not isinstance(waves, list):
+        return []
+
+    return waves
+
+
+# ---------------------------------------------------------------------------
+#  Azure Retail Prices API
+# ---------------------------------------------------------------------------
+
+_AZURE_PRICING_URL = "https://prices.azure.com/api/retail/prices"
+
+
+async def _fetch_azure_price(
+    service_name: str,
+    sku_name: str = "",
+    region: str = "eastus",
+) -> float:
+    """Fetch a monthly price from the Azure Retail Prices API.
+
+    Public API, no authentication required. Uses OData filters.
+    Returns monthly cost estimate or 0.0 if not found.
+    """
+    import httpx
+
+    filters = [
+        f"serviceName eq '{service_name}'",
+        f"armRegionName eq '{region}'",
+        "priceType eq 'Consumption'",
+    ]
+    if sku_name:
+        filters.append(f"skuName eq '{sku_name}'")
+
+    params = {"$filter": " and ".join(filters), "$top": "5"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(_AZURE_PRICING_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.debug("[PRICING] API call failed for %s: %s", service_name, exc)
+        return 0.0
+
+    items = data.get("Items", [])
+    if not items:
+        return 0.0
+
+    # Pick the first matching retail price and convert hourly to monthly
+    unit_price = items[0].get("retailPrice", 0.0)
+    unit = items[0].get("unitOfMeasure", "")
+
+    if "Hour" in unit:
+        return round(unit_price * 730, 2)  # ~730 hours/month
+    elif "Month" in unit:
+        return round(unit_price, 2)
+    elif "GB" in unit:
+        return round(unit_price, 4)  # per-GB pricing, caller multiplies
+    else:
+        return round(unit_price, 2)
+
+
+async def estimate_costs(
+    classified: list[dict[str, Any]],
+    region: str = "eastus",
+) -> dict[str, Any]:
+    """Estimate monthly Azure costs for classified workloads.
+
+    Attempts live pricing from Azure Retail Prices API.
+    Falls back to catalog-based estimates if API is unavailable.
+    """
+    line_items = []
+    total_monthly = 0.0
+
+    # Static fallback estimates per service type (monthly USD)
+    _FALLBACK_COSTS = {
+        "Azure Virtual Machines": 140,
+        "Azure App Service": 150,
+        "Azure SQL Database": 250,
+        "Azure SQL Managed Instance": 500,
+        "Azure Cosmos DB": 300,
+        "Azure Database for PostgreSQL": 200,
+        "Azure Database for MySQL": 180,
+        "Azure Blob Storage": 50,
+        "Azure Files": 80,
+        "Azure Kubernetes Service": 350,
+        "Azure Container Apps": 200,
+        "Azure Functions": 50,
+        "Azure Firewall": 900,
+        "Azure Bastion": 140,
+        "Azure Key Vault": 10,
+        "Microsoft Sentinel": 500,
+        "Azure ExpressRoute": 200,
+        "Azure VPN Gateway": 140,
+        "Microsoft Entra ID": 120,
+        "Azure Monitor": 100,
+    }
+
+    for workload in classified:
+        classification = workload.get("classification", "")
+        if classification in ("retire", "retain"):
+            continue
+
+        services = workload.get("target_azure_services", [])
+        for service_name in services:
+            # Try live pricing first
+            price = await _fetch_azure_price(service_name, region=region)
+
+            # Fall back to static estimate
+            if price == 0.0:
+                price = _FALLBACK_COSTS.get(service_name, 100)
+
+            line_items.append({
+                "category": workload.get("workload_name", "Unknown"),
+                "azure_service": service_name,
+                "monthly_cost": price,
+                "notes": "",
+            })
+            total_monthly += price
+
+    # Add baseline platform costs
+    platform_services = [
+        ("Azure Firewall", 900),
+        ("Azure Bastion", 140),
+        ("Azure Key Vault", 10),
+        ("Azure Monitor", 100),
+        ("Microsoft Entra ID P2", 120),
+    ]
+    for svc_name, fallback in platform_services:
+        price = await _fetch_azure_price(svc_name, region=region)
+        if price == 0.0:
+            price = fallback
+        line_items.append({
+            "category": "Platform",
+            "azure_service": svc_name,
+            "monthly_cost": price,
+            "notes": "Shared platform service",
+        })
+        total_monthly += price
+
+    return {
+        "line_items": line_items,
+        "total_monthly": round(total_monthly, 2),
+        "region": region,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  4.  DESIGN ENGINE (Agent 3)
 # ═══════════════════════════════════════════════════════════════════════════
