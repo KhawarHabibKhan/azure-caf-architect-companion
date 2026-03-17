@@ -291,9 +291,160 @@ def recommend_operating_model(caf_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Azure certification paths mapped to common IT roles
+_CERT_MAP = {
+    "system administrator": {"cert": "AZ-104", "name": "Azure Administrator Associate"},
+    "sysadmin": {"cert": "AZ-104", "name": "Azure Administrator Associate"},
+    "network engineer": {"cert": "AZ-700", "name": "Azure Network Engineer Associate"},
+    "security analyst": {"cert": "AZ-500", "name": "Azure Security Engineer Associate"},
+    "security engineer": {"cert": "AZ-500", "name": "Azure Security Engineer Associate"},
+    "developer": {"cert": "AZ-204", "name": "Azure Developer Associate"},
+    "software engineer": {"cert": "AZ-204", "name": "Azure Developer Associate"},
+    "it director": {"cert": "AZ-305", "name": "Azure Solutions Architect Expert"},
+    "it manager": {"cert": "AZ-305", "name": "Azure Solutions Architect Expert"},
+    "architect": {"cert": "AZ-305", "name": "Azure Solutions Architect Expert"},
+    "dba": {"cert": "DP-300", "name": "Azure Database Administrator Associate"},
+    "database administrator": {"cert": "DP-300", "name": "Azure Database Administrator Associate"},
+    "devops engineer": {"cert": "AZ-400", "name": "Azure DevOps Engineer Expert"},
+    "data engineer": {"cert": "DP-203", "name": "Azure Data Engineer Associate"},
+}
+
+
+def assess_skills(caf_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """Map current team roles to Azure certification paths and identify gaps.
+
+    Returns a list of skill gap entries with recommended training.
+    """
+    team = caf_input.get("team", [])
+    results = []
+
+    for member in team:
+        role = member.get("role", "").lower()
+        experience = member.get("cloud_experience", "none")
+        current_skills = member.get("current_skills", [])
+
+        # Find best matching cert
+        cert_info = None
+        for key, info in _CERT_MAP.items():
+            if key in role:
+                cert_info = info
+                break
+
+        if not cert_info:
+            cert_info = {"cert": "AZ-900", "name": "Azure Fundamentals"}
+
+        # Determine gap and priority
+        if experience in ("advanced",):
+            gap = "Minor — may need specific Azure service training"
+            priority = "long-term"
+        elif experience in ("intermediate",):
+            gap = "Moderate — needs Azure-specific certification"
+            priority = "short-term"
+        else:
+            gap = "Significant — no cloud experience, needs foundational + role-specific training"
+            priority = "immediate"
+
+        results.append({
+            "role": member.get("role", "Unknown"),
+            "current_skills": current_skills,
+            "gap": gap,
+            "recommended_training": f"{cert_info['cert']} - {cert_info['name']}",
+            "priority": priority,
+        })
+
+    return results
+
+
+async def run_assessment(caf_input: dict[str, Any]) -> dict[str, Any]:
+    """Run full Agent 1 assessment: readiness + operating model + skills.
+
+    Uses rule-based heuristics for readiness and operating model,
+    then LLM for a narrative summary.
+    """
+    readiness = assess_readiness(caf_input)
+    operating_model = recommend_operating_model(caf_input)
+    skills = assess_skills(caf_input)
+
+    # Generate narrative summary via LLM
+    from knowledge.caf_prompts import ASSESSMENT_PROMPT
+    summary_input = json.dumps({
+        "organization": {
+            "company_name": caf_input.get("company_name", ""),
+            "industry": caf_input.get("industry", ""),
+            "employee_count": caf_input.get("employee_count", 0),
+            "compliance": caf_input.get("compliance_requirements", []),
+        },
+        "applications_count": len(caf_input.get("applications", [])),
+        "team_count": sum(m.get("count", 0) for m in caf_input.get("team", [])),
+        "budget_migration": caf_input.get("budget_migration", 0),
+        "timeline_months": caf_input.get("timeline_months", 12),
+        "readiness_scores": readiness["readiness_scores"],
+    }, indent=2)
+
+    try:
+        llm_result = await _llm_call(ASSESSMENT_PROMPT, summary_input)
+        readiness_summary = llm_result.get("readiness_summary", "")
+        key_concerns = llm_result.get("key_concerns", [])
+        # Use LLM's team structure recommendation if available
+        if llm_result.get("operating_model", {}).get("recommended_structure"):
+            operating_model["recommended_structure"] = llm_result["operating_model"]["recommended_structure"]
+    except Exception:
+        readiness_summary = ""
+        key_concerns = []
+
+    return {
+        "overall_readiness": readiness["overall_readiness"],
+        "readiness_summary": readiness_summary,
+        "readiness_scores": readiness["readiness_scores"],
+        "operating_model": operating_model,
+        "skills_assessment": skills,
+        "key_concerns": key_concerns,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  3.  PLAN & ANALYZE ENGINE (Agent 2)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _load_knowledge(filename: str) -> dict[str, Any]:
+    """Load a JSON knowledge file from the knowledge/ directory."""
+    knowledge_dir = Path(__file__).parent / "knowledge"
+    filepath = knowledge_dir / filename
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+async def classify_workloads(caf_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """Classify each application workload using the 7 R's framework.
+
+    Uses LLM with the Azure services catalog injected into context.
+    """
+    apps = caf_input.get("applications", [])
+    if not apps:
+        return []
+
+    azure_catalog = _load_knowledge("azure_services.json")
+
+    from knowledge.caf_prompts import CLASSIFY_WORKLOAD_PROMPT
+
+    user_content = json.dumps({
+        "applications": apps,
+        "azure_services_catalog": azure_catalog,
+    }, indent=2)
+
+    try:
+        result = await _llm_call(CLASSIFY_WORKLOAD_PROMPT, user_content)
+    except Exception as exc:
+        logger.debug("[PLAN] Workload classification failed: %s", exc)
+        return []
+
+    # Result should be a list; handle if LLM wraps it in an object
+    if isinstance(result, dict):
+        result = result.get("workloads", result.get("classifications", []))
+    if not isinstance(result, list):
+        return []
+
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
