@@ -851,15 +851,362 @@ def _default_landing_zone(
 #  5.  EXCALIDRAW LANDING ZONE RENDERER
 # ═══════════════════════════════════════════════════════════════════════════
 
+import math
+
+_AZURE_COLORS: dict[str, dict[str, str]] = {
+    "management_group": {"bg": "#e3f2fd", "border": "#1565c0"},
+    "subscription":     {"bg": "#e8f5e9", "border": "#2e7d32"},
+    "vnet_hub":         {"bg": "#f3e5f5", "border": "#7b1fa2"},
+    "vnet_spoke":       {"bg": "#ede7f6", "border": "#512da8"},
+    "compute":          {"bg": "#fff3e0", "border": "#e65100"},
+    "database":         {"bg": "#fffde7", "border": "#f9a825"},
+    "storage":          {"bg": "#e0f7fa", "border": "#00838f"},
+    "security":         {"bg": "#fce4ec", "border": "#c62828"},
+    "networking":       {"bg": "#f3e5f5", "border": "#6a1b9a"},
+    "identity":         {"bg": "#e8eaf6", "border": "#283593"},
+    "on_premises":      {"bg": "#eceff1", "border": "#455a64"},
+    "monitoring":       {"bg": "#f1f8e9", "border": "#558b2f"},
+}
+_AZ_DEFAULT_COL = {"bg": "#e7f5ff", "border": "#1c7ed6"}
+_BOX_W, _BOX_H = 180, 60
+_MG_W, _MG_H = 200, 50
+
+
+def _az_rect(
+    elem_id: str, label: str, color_key: str,
+    x: int, y: int, w: int = _BOX_W, h: int = _BOX_H,
+    dashed: bool = False,
+) -> list[dict]:
+    """Create an Excalidraw rectangle with a centered label."""
+    col = _AZURE_COLORS.get(color_key, _AZ_DEFAULT_COL)
+    rect = {
+        "type": "rectangle", "id": elem_id,
+        "x": x, "y": y, "width": w, "height": h,
+        "strokeColor": col["border"], "backgroundColor": col["bg"],
+        "fillStyle": "solid", "roundness": {"type": 3},
+    }
+    if dashed:
+        rect["strokeStyle"] = "dashed"
+    text = {
+        "type": "text", "id": f"{elem_id}_lbl",
+        "x": x + 8, "y": y + (h // 2) - 10,
+        "width": w - 16, "height": 20,
+        "text": label, "fontSize": 14,
+        "textAlign": "center", "strokeColor": "#1e1e1e",
+    }
+    return [rect, text]
+
+
+def _az_arrow(
+    elem_id: str,
+    x0: int, y0: int, x1: int, y1: int,
+    label: str = "", dashed: bool = False,
+) -> list[dict]:
+    """Create an Excalidraw arrow between two points."""
+    dx, dy = x1 - x0, y1 - y0
+    arrow = {
+        "type": "arrow", "id": elem_id,
+        "x": x0, "y": y0,
+        "width": abs(dx), "height": abs(dy),
+        "strokeColor": "#495057",
+        "points": [[0, 0], [dx, dy]],
+        "startArrowhead": None, "endArrowhead": "arrow",
+    }
+    if dashed:
+        arrow["strokeStyle"] = "dashed"
+    elems = [arrow]
+    if label:
+        elems.append({
+            "type": "text", "id": f"{elem_id}_lbl",
+            "x": x0 + dx // 2 - 50, "y": y0 + dy // 2 - 10,
+            "width": 100, "height": 16,
+            "text": label, "fontSize": 11,
+            "textAlign": "center", "strokeColor": "#868e96",
+        })
+    return elems
+
+
+def _render_mgmt_group_tree(
+    node: dict, x: int, y: int, depth: int = 0,
+) -> tuple[list[dict], int]:
+    """Recursively render management group hierarchy. Returns (elements, next_x)."""
+    elems: list[dict] = []
+    name = node.get("name", "Unknown")
+    node_id = f"mg_{name.lower().replace(' ', '_')}_{depth}"
+    w = max(_MG_W, len(name) * 10 + 20)
+
+    elems.extend(_az_rect(node_id, name, "management_group", x, y, w, _MG_H))
+
+    children = node.get("children", [])
+    if not children:
+        return elems, x + w + 30
+
+    child_y = y + _MG_H + 60
+    child_x = x
+    child_centers = []
+
+    for child in children:
+        child_elems, next_x = _render_mgmt_group_tree(child, child_x, child_y, depth + 1)
+        elems.extend(child_elems)
+        child_center_x = (child_x + next_x - 30) // 2
+        child_centers.append(child_center_x)
+        child_x = next_x
+
+    # Draw lines from parent to children
+    parent_cx = x + w // 2
+    parent_bottom = y + _MG_H
+    for i, ccx in enumerate(child_centers):
+        elems.extend(_az_arrow(
+            f"{node_id}_to_child_{i}",
+            parent_cx, parent_bottom, ccx, child_y,
+        ))
+
+    return elems, child_x
+
+
+def _render_hub_spoke(
+    network: dict, x: int, y: int,
+) -> list[dict]:
+    """Render hub-spoke network topology."""
+    elems: list[dict] = []
+    hub = network.get("hub_vnet", {})
+    spokes = network.get("spoke_vnets", [])
+    on_prem = network.get("on_prem_connectivity", "VPN")
+
+    # Hub VNet — larger box
+    hub_w, hub_h = 280, 160
+    hub_name = hub.get("name", "Hub VNet")
+    hub_cidr = hub.get("cidr", "10.0.0.0/16")
+    elems.extend(_az_rect("hub_vnet", f"{hub_name}\n{hub_cidr}", "vnet_hub",
+                          x, y, hub_w, hub_h, dashed=True))
+
+    # Hub components inside
+    components = hub.get("components", [])
+    comp_x = x + 15
+    comp_y = y + 55
+    for i, comp_name in enumerate(components):
+        comp_id = f"hub_comp_{i}"
+        ctype = "security" if "firewall" in comp_name.lower() else "networking"
+        elems.extend(_az_rect(comp_id, comp_name, ctype,
+                              comp_x, comp_y, 120, 35))
+        comp_x += 130
+
+    # On-premises connection (left of hub)
+    on_prem_x = x - 220
+    on_prem_y = y + hub_h // 2 - 30
+    elems.extend(_az_rect("on_prem", "On-Premises", "on_premises",
+                          on_prem_x, on_prem_y))
+    elems.extend(_az_arrow("on_prem_to_hub",
+                           on_prem_x + _BOX_W, on_prem_y + _BOX_H // 2,
+                           x, y + hub_h // 2,
+                           on_prem, dashed=True))
+
+    # Spoke VNets — arranged in an arc to the right
+    if spokes:
+        spoke_start_y = y - 40
+        spoke_x = x + hub_w + 80
+        spoke_gap = max(90, hub_h // max(len(spokes), 1))
+
+        for i, spoke in enumerate(spokes):
+            spoke_id = f"spoke_{i}"
+            spoke_name = spoke.get("name", f"Spoke {i}")
+            spoke_cidr = spoke.get("cidr", "")
+            spoke_label = f"{spoke_name}\n{spoke_cidr}" if spoke_cidr else spoke_name
+            spoke_y = spoke_start_y + i * spoke_gap
+
+            elems.extend(_az_rect(spoke_id, spoke_label, "vnet_spoke",
+                                  spoke_x, spoke_y, 200, 55, dashed=True))
+
+            # Peering arrow from hub to spoke
+            elems.extend(_az_arrow(
+                f"hub_to_{spoke_id}",
+                x + hub_w, y + hub_h // 2,
+                spoke_x, spoke_y + 27,
+                "peering",
+            ))
+
+    return elems
+
+
+def generate_landing_zone_elements(design: dict[str, Any]) -> dict[str, Any]:
+    """Build Excalidraw elements for the full landing zone architecture.
+
+    Layout: Management groups (top) → Hub-spoke network (bottom).
+    Returns {"elements_json": str, "element_count": int}.
+    """
+    elems: list[dict] = []
+
+    # Zone 1: Management group hierarchy
+    mg = design.get("management_groups", {})
+    root = mg.get("root", mg)
+    if root:
+        mg_elems, _ = _render_mgmt_group_tree(root, 0, 0)
+        elems.extend(mg_elems)
+
+    # Zone 2: Hub-spoke network (below management groups)
+    network = design.get("network_design", {})
+    if network:
+        network_y = 350  # below MG tree
+        hub_spoke_elems = _render_hub_spoke(network, 200, network_y)
+        elems.extend(hub_spoke_elems)
+
+    # Camera pseudo-element for auto-zoom
+    if elems:
+        all_x = [e.get("x", 0) for e in elems if "x" in e]
+        all_y = [e.get("y", 0) for e in elems if "y" in e]
+        if all_x and all_y:
+            elems.insert(0, {
+                "type": "cameraUpdate",
+                "x": min(all_x) - 50, "y": min(all_y) - 50,
+                "width": max(all_x) - min(all_x) + 400,
+                "height": max(all_y) - min(all_y) + 300,
+            })
+
+    return {"elements_json": json.dumps(elems), "element_count": len(elems)}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  6.  PNG EXPORT
 # ═══════════════════════════════════════════════════════════════════════════
 
+def export_landing_zone_png(
+    design: dict[str, Any],
+    filepath: str = "./output/architecture.png",
+    scale: float = 2.0,
+) -> str:
+    """Render the landing zone diagram as a PNG using Pillow.
+
+    Uses the same layout as the Excalidraw renderer.
+    Returns absolute path to the saved PNG.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    result = generate_landing_zone_elements(design)
+    raw_elems = json.loads(result["elements_json"])
+    # Filter out pseudo-elements
+    elems = [e for e in raw_elems if e.get("type") not in ("cameraUpdate",)]
+
+    if not elems:
+        img = Image.new("RGB", (400, 200), "#ffffff")
+        draw = ImageDraw.Draw(img)
+        draw.text((20, 80), "No landing zone to render", fill="#1e1e1e")
+        os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+        img.save(filepath, "PNG")
+        return os.path.abspath(filepath)
+
+    # Canvas bounds
+    all_x = [e.get("x", 0) for e in elems if "x" in e]
+    all_y = [e.get("y", 0) for e in elems if "y" in e]
+    all_w = [e.get("x", 0) + e.get("width", 0) for e in elems if "width" in e]
+    all_h = [e.get("y", 0) + e.get("height", 0) for e in elems if "height" in e]
+
+    pad = 80
+    min_x = min(all_x) - pad
+    min_y = min(all_y) - pad
+    max_x = max(all_w + all_x) + pad
+    max_y = max(all_h + all_y) + pad
+
+    cw = int((max_x - min_x) * scale)
+    ch = int((max_y - min_y) * scale)
+    img = Image.new("RGB", (max(cw, 100), max(ch, 100)), "#ffffff")
+    draw = ImageDraw.Draw(img)
+
+    def sx(v: float) -> float:
+        return (v - min_x) * scale
+
+    def sy(v: float) -> float:
+        return (v - min_y) * scale
+
+    # Load fonts
+    try:
+        font = ImageFont.truetype("arial.ttf", int(14 * scale))
+        font_sm = ImageFont.truetype("arial.ttf", int(11 * scale))
+    except (IOError, OSError):
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", int(14 * scale))
+            font_sm = ImageFont.truetype("DejaVuSans.ttf", int(11 * scale))
+        except (IOError, OSError):
+            font = ImageFont.load_default()
+            font_sm = font
+
+    # Draw elements
+    for elem in elems:
+        etype = elem.get("type", "")
+
+        if etype == "rectangle":
+            x0 = sx(elem["x"])
+            y0 = sy(elem["y"])
+            x1 = sx(elem["x"] + elem.get("width", _BOX_W))
+            y1 = sy(elem["y"] + elem.get("height", _BOX_H))
+            bg = elem.get("backgroundColor", "#e7f5ff")
+            border = elem.get("strokeColor", "#1c7ed6")
+            draw.rounded_rectangle([x0, y0, x1, y1], radius=8 * scale,
+                                   fill=bg, outline=border, width=int(2 * scale))
+
+        elif etype == "text":
+            tx = sx(elem["x"])
+            ty = sy(elem["y"])
+            text = elem.get("text", "")
+            color = elem.get("strokeColor", "#1e1e1e")
+            f = font_sm if elem.get("fontSize", 14) < 13 else font
+            draw.text((tx, ty), text, fill=color, font=f)
+
+        elif etype == "arrow":
+            points = elem.get("points", [[0, 0], [0, 0]])
+            ax = sx(elem["x"])
+            ay = sy(elem["y"])
+            for j in range(len(points) - 1):
+                px0 = ax + points[j][0] * scale
+                py0 = ay + points[j][1] * scale
+                px1 = ax + points[j + 1][0] * scale
+                py1 = ay + points[j + 1][1] * scale
+                draw.line([(px0, py0), (px1, py1)],
+                          fill=elem.get("strokeColor", "#495057"),
+                          width=int(2 * scale))
+                # Arrowhead
+                angle = math.atan2(py1 - py0, px1 - px0)
+                arrow_len = 10 * scale
+                draw.polygon([
+                    (px1, py1),
+                    (px1 - arrow_len * math.cos(angle - 0.4),
+                     py1 - arrow_len * math.sin(angle - 0.4)),
+                    (px1 - arrow_len * math.cos(angle + 0.4),
+                     py1 - arrow_len * math.sin(angle + 0.4)),
+                ], fill=elem.get("strokeColor", "#495057"))
+
+    # Watermark
+    draw.text((sx(min_x + pad), sy(max_y - pad + 40)),
+              "Azure CAF Architect Companion", fill="#c0c0c0", font=font_sm)
+
+    os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+    img.save(filepath, "PNG")
+    return os.path.abspath(filepath)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  7.  FILE SAVE HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
+
+def save_excalidraw_file(
+    elements_json: str,
+    filepath: str = "./output/architecture.excalidraw",
+) -> str:
+    """Save Excalidraw elements as a .excalidraw file."""
+    pseudo = {"cameraUpdate", "delete", "restoreCheckpoint"}
+    elements = json.loads(elements_json)
+    real = [e for e in elements if e.get("type") not in pseudo]
+    data = {
+        "type": "excalidraw",
+        "version": 2,
+        "source": "caf-companion",
+        "elements": real,
+        "appState": {"viewBackgroundColor": "#ffffff"},
+        "files": {},
+    }
+    os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return os.path.abspath(filepath)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
