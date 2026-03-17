@@ -619,9 +619,232 @@ async def estimate_costs(
     }
 
 
+async def assess_risks(
+    caf_input: dict[str, Any],
+    classified: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Generate a risk register for the migration.
+
+    Uses LLM with compliance controls injected into context.
+    """
+    compliance_reqs = caf_input.get("compliance_requirements", [])
+    compliance_map = _load_knowledge("compliance_controls.json")
+
+    # Build relevant compliance context
+    relevant_controls = {}
+    for req in compliance_reqs:
+        key = req.upper().replace("-", "_")
+        for ckey, cval in compliance_map.items():
+            if ckey.upper().replace("-", "_") == key:
+                relevant_controls[ckey] = cval
+                break
+
+    from knowledge.caf_prompts import RISK_PROMPT
+
+    user_content = json.dumps({
+        "organization": {
+            "company_name": caf_input.get("company_name", ""),
+            "industry": caf_input.get("industry", ""),
+            "employee_count": caf_input.get("employee_count", 0),
+            "compliance_requirements": compliance_reqs,
+        },
+        "classified_workloads": classified,
+        "applicable_compliance_controls": relevant_controls,
+        "team_summary": caf_input.get("team", []),
+        "budget_migration": caf_input.get("budget_migration", 0),
+        "timeline_months": caf_input.get("timeline_months", 12),
+    }, indent=2)
+
+    try:
+        result = await _llm_call(RISK_PROMPT, user_content)
+    except Exception as exc:
+        logger.debug("[PLAN] Risk assessment failed: %s", exc)
+        return []
+
+    if isinstance(result, dict):
+        result = result.get("risks", result.get("risk_register", []))
+    if not isinstance(result, list):
+        return []
+
+    return result
+
+
+async def recommend_governance(caf_input: dict[str, Any]) -> dict[str, Any]:
+    """Generate governance, security, tagging, and cost management recommendations.
+
+    Uses LLM with compliance context.
+    """
+    from knowledge.caf_prompts import GOVERNANCE_PROMPT
+
+    compliance_reqs = caf_input.get("compliance_requirements", [])
+    compliance_map = _load_knowledge("compliance_controls.json")
+
+    relevant_controls = {}
+    for req in compliance_reqs:
+        key = req.upper().replace("-", "_")
+        for ckey, cval in compliance_map.items():
+            if ckey.upper().replace("-", "_") == key:
+                relevant_controls[ckey] = cval
+                break
+
+    user_content = json.dumps({
+        "organization": {
+            "company_name": caf_input.get("company_name", ""),
+            "industry": caf_input.get("industry", ""),
+            "compliance_requirements": compliance_reqs,
+        },
+        "applicable_compliance_controls": relevant_controls,
+        "budget_monthly_target": caf_input.get("budget_monthly_target", 0),
+    }, indent=2)
+
+    try:
+        result = await _llm_call(GOVERNANCE_PROMPT, user_content)
+    except Exception as exc:
+        logger.debug("[PLAN] Governance recommendation failed: %s", exc)
+        return {"policies": [], "tagging_strategy": {}, "security": [], "cost_management": []}
+
+    return result
+
+
+async def run_plan(
+    caf_input: dict[str, Any],
+    assessment: dict[str, Any],
+) -> dict[str, Any]:
+    """Run full Agent 2 pipeline: classify → waves → costs → risks → governance."""
+    classified = await classify_workloads(caf_input)
+    waves = await plan_migration_waves(classified, caf_input.get("timeline_months", 12))
+    costs = await estimate_costs(classified)
+    risks = await assess_risks(caf_input, classified)
+    governance = await recommend_governance(caf_input)
+
+    budget_migration = caf_input.get("budget_migration", 0)
+    budget_monthly = caf_input.get("budget_monthly_target", 0)
+
+    return {
+        "workload_inventory": classified,
+        "migration_waves": waves,
+        "cost_estimation": {
+            "line_items": costs["line_items"],
+            "total_monthly": costs["total_monthly"],
+            "migration_budget_estimate": costs["total_monthly"] * 6,  # rough 6-month estimate
+            "within_budget": costs["total_monthly"] <= budget_monthly if budget_monthly else True,
+        },
+        "risk_register": risks,
+        "governance_recommendations": governance,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  4.  DESIGN ENGINE (Agent 3)
 # ═══════════════════════════════════════════════════════════════════════════
+
+async def design_landing_zone(
+    caf_input: dict[str, Any],
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Design Azure landing zone architecture using LLM.
+
+    Generates management group hierarchy, subscription layout,
+    hub-spoke network, and identity design based on CAF Ready methodology.
+    """
+    from knowledge.caf_prompts import DESIGN_PROMPT
+
+    user_content = json.dumps({
+        "organization": {
+            "company_name": caf_input.get("company_name", ""),
+            "industry": caf_input.get("industry", ""),
+            "compliance_requirements": caf_input.get("compliance_requirements", []),
+        },
+        "workload_inventory": plan.get("workload_inventory", []),
+        "migration_waves": plan.get("migration_waves", []),
+        "infrastructure": caf_input.get("current_infrastructure", []),
+    }, indent=2)
+
+    try:
+        result = await _llm_call(DESIGN_PROMPT, user_content)
+    except Exception as exc:
+        logger.debug("[DESIGN] Landing zone design failed: %s", exc)
+        return _default_landing_zone(caf_input, plan)
+
+    # Ensure all expected keys exist
+    for key in ("management_groups", "subscriptions", "network_design",
+                "identity_design", "governance_baseline"):
+        if key not in result:
+            result[key] = {}
+
+    return result
+
+
+def _default_landing_zone(
+    caf_input: dict[str, Any],
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Generate a sensible default landing zone when LLM is unavailable."""
+    company = caf_input.get("company_name", "Organization")
+    workloads = plan.get("workload_inventory", [])
+
+    # Build spoke VNets from workloads
+    spokes = []
+    cidr_counter = 1
+    for w in workloads:
+        classification = w.get("classification", "")
+        if classification in ("retire", "retain", "replace"):
+            continue
+        spokes.append({
+            "name": f"{w.get('workload_name', 'workload').lower().replace(' ', '-')}-spoke",
+            "cidr": f"10.{cidr_counter}.0.0/16",
+            "workload": w.get("workload_name", ""),
+            "peering_to_hub": True,
+        })
+        cidr_counter += 1
+
+    return {
+        "management_groups": {
+            "root": {
+                "name": f"{company} Root",
+                "children": [
+                    {"name": "Platform", "purpose": "Shared infrastructure", "children": [
+                        {"name": "Connectivity", "purpose": "Hub networking, DNS, ExpressRoute", "children": []},
+                        {"name": "Identity", "purpose": "Entra ID Connect, domain controllers", "children": []},
+                        {"name": "Management", "purpose": "Log Analytics, monitoring, automation", "children": []},
+                    ]},
+                    {"name": "Workloads", "purpose": "Application workloads", "children": [
+                        {"name": "Production", "purpose": "Production subscriptions", "children": []},
+                        {"name": "Non-Production", "purpose": "Dev/test/staging", "children": []},
+                    ]},
+                    {"name": "Decommissioned", "purpose": "Retired workloads", "children": []},
+                ],
+            }
+        },
+        "subscriptions": [
+            {"name": "Connectivity", "purpose": "Hub networking", "management_group": "Platform", "workloads": []},
+            {"name": "Identity", "purpose": "Identity services", "management_group": "Platform", "workloads": []},
+            {"name": "Management", "purpose": "Monitoring and management", "management_group": "Platform", "workloads": []},
+        ],
+        "network_design": {
+            "topology": "hub-spoke",
+            "hub_vnet": {
+                "name": "hub-vnet",
+                "cidr": "10.0.0.0/16",
+                "components": ["Azure Firewall", "Azure Bastion", "VPN Gateway"],
+            },
+            "spoke_vnets": spokes,
+            "on_prem_connectivity": "VPN",
+        },
+        "identity_design": {
+            "provider": "Microsoft Entra ID",
+            "tier": "P2",
+            "features": ["Conditional Access", "MFA", "PIM"],
+        },
+        "governance_baseline": {
+            "policy_assignments": [
+                "Require encryption at rest",
+                "Deny public IP on VMs",
+                "Require resource tagging",
+            ],
+            "monitoring": ["Azure Monitor", "Log Analytics"],
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
