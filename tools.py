@@ -1213,7 +1213,113 @@ def save_excalidraw_file(
 #  8.  REPORT BUILDER
 # ═══════════════════════════════════════════════════════════════════════════
 
+import uuid
+
+
+def build_caf_report(
+    caf_input: dict[str, Any],
+    assessment: dict[str, Any],
+    plan: dict[str, Any],
+    design: dict[str, Any],
+    diagram_info: dict[str, Any],
+) -> dict[str, Any]:
+    """Compose the final CAF report from all agent outputs."""
+    workloads = plan.get("workload_inventory", [])
+    costs = plan.get("cost_estimation", {})
+    risks = plan.get("risk_register", [])
+
+    # Classification breakdown
+    breakdown: dict[str, int] = {}
+    for w in workloads:
+        c = w.get("classification", "unknown")
+        breakdown[c] = breakdown.get(c, 0) + 1
+
+    # Risk level
+    risk_priorities = [r.get("priority", "low") for r in risks]
+    if "critical" in risk_priorities:
+        risk_level = "critical"
+    elif "high" in risk_priorities:
+        risk_level = "high"
+    elif "medium" in risk_priorities:
+        risk_level = "moderate"
+    else:
+        risk_level = "low"
+
+    return {
+        "executive_summary": {
+            "company_name": caf_input.get("company_name", ""),
+            "industry": caf_input.get("industry", ""),
+            "total_workloads": len(workloads),
+            "classification_breakdown": breakdown,
+            "timeline_months": caf_input.get("timeline_months", 12),
+            "monthly_cost": costs.get("total_monthly", 0),
+            "migration_budget_estimate": costs.get("migration_budget_estimate", 0),
+            "within_budget": costs.get("within_budget", True),
+            "overall_readiness": assessment.get("overall_readiness", ""),
+            "risk_level": risk_level,
+            "total_risks": len(risks),
+        },
+        "assessment": assessment,
+        "plan": {
+            "workload_inventory": workloads,
+            "migration_waves": plan.get("migration_waves", []),
+        },
+        "cost_estimation": costs,
+        "risk_register": risks,
+        "governance_recommendations": plan.get("governance_recommendations", {}),
+        "landing_zone": design,
+        "diagram": diagram_info,
+    }
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  9.  PIPELINE ORCHESTRATOR
 # ═══════════════════════════════════════════════════════════════════════════
+
+async def run_full_pipeline(content: str) -> dict[str, Any]:
+    """Chain Agent 1 → Agent 2 → Agent 3, returning the complete CAF report.
+
+    This is the top-level function called by api.py, main.py, and run_local.py.
+    """
+    # Step 0: Parse input
+    caf_input = await parse_caf_input(content)
+
+    # Step 1: Assessment (Agent 1)
+    assessment = await run_assessment(caf_input)
+
+    # Step 2: Plan & Analyze (Agent 2)
+    plan = await run_plan(caf_input, assessment)
+
+    # Step 3: Design (Agent 3)
+    design = await design_landing_zone(caf_input, plan)
+
+    # Step 4: Generate diagram
+    run_id = uuid.uuid4().hex[:8]
+    lz_elements = generate_landing_zone_elements(design)
+
+    excalidraw_path = save_excalidraw_file(
+        lz_elements["elements_json"],
+        f"./output/architecture_{run_id}.excalidraw",
+    )
+    png_path = export_landing_zone_png(
+        design,
+        f"./output/architecture_{run_id}.png",
+    )
+
+    excalidraw_file = None
+    try:
+        with open(excalidraw_path, "r", encoding="utf-8") as f:
+            excalidraw_file = json.load(f)
+    except Exception:
+        pass
+
+    diagram_info = {
+        "element_count": lz_elements["element_count"],
+        "local_file": excalidraw_path,
+        "png_file": png_path,
+        "excalidraw_file": excalidraw_file,
+        "run_id": run_id,
+    }
+
+    # Step 5: Build report
+    return build_caf_report(caf_input, assessment, plan, design, diagram_info)

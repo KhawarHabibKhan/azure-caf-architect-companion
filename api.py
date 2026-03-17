@@ -4,3 +4,176 @@ Azure CAF Architect Companion - FastAPI Backend
 Exposes the CAF assessment pipeline as REST endpoints.
 Serves the React frontend static files in production.
 """
+
+import json
+import logging
+import os
+import re
+import uuid
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from tools import (
+    parse_caf_input,
+    run_assessment,
+    run_plan,
+    design_landing_zone,
+    generate_landing_zone_elements,
+    save_excalidraw_file,
+    export_landing_zone_png,
+    build_caf_report,
+    run_full_pipeline,
+)
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger("caf-companion.api")
+
+MAX_INPUT_SIZE = 500_000  # ~500 KB
+
+app = FastAPI(
+    title="Azure CAF Architect Companion API",
+    description="Automates pre-deployment phases of Microsoft's Cloud Adoption Framework.",
+    version="0.1.0",
+)
+
+# CORS
+_default_origins = ["http://localhost:5173", "http://localhost:8000"]
+_origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else _default_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _origins if o.strip()],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+class ReviewRequest(BaseModel):
+    content: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _validate_run_id(run_id: str) -> None:
+    if not re.match(r"^[a-f0-9]{1,16}$", run_id):
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "service": "Azure CAF Architect Companion"}
+
+
+@app.post("/api/review")
+async def review(req: ReviewRequest):
+    """Run the full 3-agent CAF pipeline."""
+    if len(req.content) > MAX_INPUT_SIZE:
+        raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    try:
+        report = await run_full_pipeline(req.content)
+        return JSONResponse(content=report)
+    except Exception as exc:
+        logger.exception("Pipeline failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/assess")
+async def assess(req: ReviewRequest):
+    """Run Agent 1 only: parse input + assessment."""
+    if len(req.content) > MAX_INPUT_SIZE:
+        raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    try:
+        caf_input = await parse_caf_input(req.content)
+        assessment = await run_assessment(caf_input)
+        return JSONResponse(content={"caf_input": caf_input, "assessment": assessment})
+    except Exception as exc:
+        logger.exception("Assessment failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/plan")
+async def plan(req: ReviewRequest):
+    """Run Agent 1 + Agent 2: assessment + plan."""
+    if len(req.content) > MAX_INPUT_SIZE:
+        raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    try:
+        caf_input = await parse_caf_input(req.content)
+        assessment = await run_assessment(caf_input)
+        plan_result = await run_plan(caf_input, assessment)
+        return JSONResponse(content={
+            "caf_input": caf_input,
+            "assessment": assessment,
+            "plan": plan_result,
+        })
+    except Exception as exc:
+        logger.exception("Planning failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/download/png/{run_id}")
+async def download_png(run_id: str):
+    _validate_run_id(run_id)
+    filepath = Path(f"./output/architecture_{run_id}.png")
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="PNG not found")
+    return FileResponse(str(filepath), media_type="image/png",
+                        filename=f"caf_architecture_{run_id}.png")
+
+
+@app.get("/api/download/excalidraw/{run_id}")
+async def download_excalidraw(run_id: str):
+    _validate_run_id(run_id)
+    filepath = Path(f"./output/architecture_{run_id}.excalidraw")
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Excalidraw file not found")
+    return FileResponse(str(filepath), media_type="application/json",
+                        filename=f"caf_architecture_{run_id}.excalidraw")
+
+
+# ---------------------------------------------------------------------------
+# Static frontend (production)
+# ---------------------------------------------------------------------------
+
+_frontend_dist = Path(__file__).parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=True)
