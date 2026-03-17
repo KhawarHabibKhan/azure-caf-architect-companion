@@ -1,0 +1,13 @@
+name: Azure CAF Architect Companion
+description: AI agent that automates pre-deployment phases of Microsoft's Cloud Adoption Framework. Produces readiness assessments, workload classifications, migration plans, cost estimates, and architecture diagrams.
+kind: hosted
+protocol: responses
+model: gpt-4.1
+tags:
+  - Cloud Adoption Framework
+  - Azure Landing Zone
+  - Migration Planning
+  - Cost Estimation
+  - Risk Assessment
+  - Excalidraw Diagram
+  - Governance

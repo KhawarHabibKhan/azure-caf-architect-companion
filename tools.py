@@ -25,7 +25,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agent_framework import ChatMessage
+from agent_framework import Message
 from agent_framework.azure import AzureOpenAIChatClient
 
 from knowledge.caf_prompts import PARSE_INPUT_PROMPT
@@ -67,13 +67,13 @@ async def _llm_call(system_prompt: str, user_content: str) -> dict[str, Any]:
 
     response = await client.get_response(
         messages=[
-            ChatMessage(role="system", text=system_prompt),
-            ChatMessage(role="user", text=user_content[:20000]),
+            Message("system", [system_prompt]),
+            Message("user", [user_content[:20000]]),
         ],
         temperature=0.1,
     )
 
-    raw = response.text or "{}"
+    raw = response.messages[0].text if response.messages else "{}"
     # Strip markdown fences if present
     raw = raw.strip()
     if raw.startswith("```"):
