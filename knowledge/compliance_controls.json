@@ -1,0 +1,150 @@
+{
+  "HIPAA": {
+    "description": "Health Insurance Portability and Accountability Act",
+    "applies_to": ["healthcare", "health insurance", "medical"],
+    "required_controls": [
+      "Encryption at rest for all PHI data",
+      "Encryption in transit (TLS 1.2+) for all data flows",
+      "Audit logging on all resources handling PHI",
+      "Quarterly access reviews",
+      "Microsoft Defender for Cloud enabled",
+      "Private endpoints for all PaaS services",
+      "Azure Key Vault for secrets management",
+      "Multi-factor authentication for all users",
+      "Business Associate Agreement (BAA) with Microsoft",
+      "Data Loss Prevention (DLP) policies",
+      "Backup and disaster recovery for PHI data"
+    ],
+    "azure_services_required": [
+      "defender",
+      "sentinel",
+      "key_vault",
+      "entra_id_p2",
+      "log_analytics"
+    ],
+    "recommended_certifications": ["AZ-500", "SC-900"]
+  },
+  "SOC2": {
+    "description": "Service Organization Control 2 - Trust Services Criteria",
+    "applies_to": ["saas", "technology", "cloud services", "data processing"],
+    "required_controls": [
+      "Access control policies with least privilege",
+      "Change management procedures",
+      "System monitoring and alerting",
+      "Incident response plan",
+      "Logical and physical access controls",
+      "Data encryption at rest and in transit",
+      "Vulnerability management and patching",
+      "Vendor risk management",
+      "Employee security awareness training",
+      "Business continuity and disaster recovery plan"
+    ],
+    "azure_services_required": [
+      "defender",
+      "key_vault",
+      "entra_id_p1",
+      "monitor",
+      "log_analytics"
+    ],
+    "recommended_certifications": ["AZ-500", "SC-200"]
+  },
+  "PCI_DSS": {
+    "description": "Payment Card Industry Data Security Standard",
+    "applies_to": ["retail", "e-commerce", "payment processing", "financial"],
+    "required_controls": [
+      "Network segmentation for cardholder data environment",
+      "Firewall configuration to protect cardholder data",
+      "Encryption of cardholder data at rest and in transit",
+      "Restrict access to cardholder data on need-to-know basis",
+      "Unique IDs for each person with access",
+      "Regular vulnerability scanning and penetration testing",
+      "Maintain audit trail for all access to cardholder data",
+      "Anti-malware on all systems",
+      "Secure development practices",
+      "Regular security policy reviews"
+    ],
+    "azure_services_required": [
+      "firewall",
+      "key_vault",
+      "defender",
+      "sentinel",
+      "entra_id_p2",
+      "application_gateway"
+    ],
+    "recommended_certifications": ["AZ-500", "SC-200"]
+  },
+  "GDPR": {
+    "description": "General Data Protection Regulation (EU)",
+    "applies_to": ["eu_operations", "eu_customers", "personal_data"],
+    "required_controls": [
+      "Data residency in EU regions",
+      "Right to erasure (data deletion capability)",
+      "Data portability support",
+      "Consent management",
+      "Data Protection Impact Assessment (DPIA)",
+      "Data Protection Officer (DPO) designation",
+      "72-hour breach notification capability",
+      "Privacy by design in all systems",
+      "Data processing agreements with vendors",
+      "Records of processing activities"
+    ],
+    "azure_services_required": [
+      "key_vault",
+      "entra_id_p1",
+      "log_analytics",
+      "defender"
+    ],
+    "recommended_certifications": ["SC-900", "SC-400"]
+  },
+  "FedRAMP": {
+    "description": "Federal Risk and Authorization Management Program (US Government)",
+    "applies_to": ["us_government", "federal", "government_contractor"],
+    "required_controls": [
+      "Azure Government region deployment",
+      "FIPS 140-2 compliant encryption",
+      "Continuous monitoring",
+      "Personnel security screening",
+      "Incident response within defined timelines",
+      "Configuration management baselines",
+      "System and communications protection",
+      "Access control with MFA",
+      "Audit and accountability logging",
+      "Risk assessment and authorization"
+    ],
+    "azure_services_required": [
+      "defender",
+      "sentinel",
+      "key_vault",
+      "entra_id_p2",
+      "log_analytics",
+      "firewall"
+    ],
+    "recommended_certifications": ["AZ-500", "SC-200", "SC-300"]
+  },
+  "ISO_27001": {
+    "description": "International information security management standard",
+    "applies_to": ["any"],
+    "required_controls": [
+      "Information Security Management System (ISMS)",
+      "Risk assessment and treatment",
+      "Security policy documentation",
+      "Asset management and classification",
+      "Access control management",
+      "Cryptographic controls",
+      "Physical and environmental security",
+      "Operations security and monitoring",
+      "Communications security",
+      "Supplier relationship security",
+      "Incident management process",
+      "Business continuity management"
+    ],
+    "azure_services_required": [
+      "defender",
+      "key_vault",
+      "entra_id_p1",
+      "monitor",
+      "log_analytics"
+    ],
+    "recommended_certifications": ["AZ-500", "SC-900"]
+  }
+}
