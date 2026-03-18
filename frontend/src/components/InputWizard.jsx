@@ -1,27 +1,6 @@
 import { useState } from "react";
 
-const SAMPLE = `Company: MediTrack Health Solutions
-Industry: Healthcare
-Employees: 200
-Compliance: HIPAA required
-
-Current Infrastructure:
-- 2 on-premises data centers (Dallas, Chicago)
-- Active Directory for identity
-- VMware vSphere managing 60 VMs
-
-Applications:
-1. Patient Portal - .NET Framework 4.8, SQL Server 2016 (2TB), 15K daily users, 99.9% SLA
-2. EHR System - Java on 8 VMs, Oracle 19c (5TB), HL7/FHIR integrations
-3. HR & Payroll - SAP SuccessFactors (SaaS), AD SSO
-4. Medical Imaging (PACS) - 50TB DICOM images, 80 radiologists
-5. Legacy Billing - COBOL on IBM AS/400, 20 years old
-6. Wiki & File Shares - Confluence VM + 3TB file server
-7. Dev/Test - 12 VMs, no production traffic
-
-Team: 1 IT Director, 3 Sysadmins, 2 Network Engineers, 1 Security Analyst, 8 Developers (.NET/Java), no cloud experience
-Budget: $800K migration, $30K/month ongoing
-Timeline: 12 months`;
+const SAMPLE = `MediTrack Health Solutions is a healthcare company with 200 employees operating out of a single on-premises data center in Chicago. They run 7 applications including a Patient Portal (React/Node.js, PostgreSQL, 5000 daily users), an EHR system (.NET, SQL Server 2TB, mission-critical), medical imaging storage (50TB DICOM), a legacy billing system on Oracle that is no longer vendor-supported, and dev/test VMs. HR is already on Workday. The team of 15 has no Azure experience. They must comply with HIPAA, have a $500K migration budget, $20K/month target, and need to complete the migration in 12 months.`;
 
 export default function InputWizard({ onSubmit, loading }) {
   const [content, setContent] = useState("");
@@ -35,21 +14,30 @@ export default function InputWizard({ onSubmit, loading }) {
 
   return (
     <div className="input-section">
+      <div className="input-label">Describe your infrastructure</div>
+      <div className="input-hint">
+        Include your applications, team size and experience, compliance requirements, budget, and timeline. Plain English works fine.
+      </div>
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="Describe your current infrastructure, applications, team, budget, and timeline..."
+        placeholder="e.g. We are a healthcare company with 200 employees. We run a patient portal on .NET and SQL Server, a legacy billing system on Oracle, and dev/test VMs on-premises. The team has no cloud experience. We need to comply with HIPAA and migrate within 12 months with a $500K budget..."
+        disabled={loading}
       />
       <div className="btn-row">
-        <button className="btn btn-primary" onClick={() => onSubmit(content)} disabled={loading || !content.trim()}>
+        <button
+          className="btn btn-primary"
+          onClick={() => onSubmit(content)}
+          disabled={loading || !content.trim()}
+        >
           {loading ? "Analyzing..." : "Run CAF Assessment"}
         </button>
-        <button className="btn btn-secondary" onClick={() => setContent(SAMPLE)}>
+        <button className="btn btn-secondary" onClick={() => setContent(SAMPLE)} disabled={loading}>
           Load Sample
         </button>
-        <label className="btn btn-secondary" style={{ cursor: "pointer" }}>
+        <label className="btn btn-secondary" style={{ cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}>
           Upload File
-          <input type="file" accept=".txt,.md,.yaml,.yml" onChange={handleFile} style={{ display: "none" }} />
+          <input type="file" accept=".txt,.md" onChange={handleFile} style={{ display: "none" }} disabled={loading} />
         </label>
       </div>
     </div>

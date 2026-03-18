@@ -18,7 +18,7 @@ load_dotenv(override=True)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -138,6 +138,58 @@ async def plan(req: ReviewRequest):
     except Exception as exc:
         logger.exception("Planning failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/review/stream")
+async def review_stream(req: ReviewRequest):
+    """Stream the full CAF pipeline step by step as SSE events."""
+    if len(req.content) > MAX_INPUT_SIZE:
+        raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    async def generate():
+        def evt(data: dict) -> str:
+            return f"data: {json.dumps(data)}\n\n"
+
+        try:
+            yield evt({"step": "parsing", "status": "running"})
+            caf_input = await parse_caf_input(req.content)
+            yield evt({"step": "parsing", "status": "done"})
+
+            yield evt({"step": "assessment", "status": "running"})
+            assessment = await run_assessment(caf_input)
+            yield evt({"step": "assessment", "status": "done"})
+
+            yield evt({"step": "planning", "status": "running"})
+            plan_result = await run_plan(caf_input, assessment)
+            yield evt({"step": "planning", "status": "done"})
+
+            yield evt({"step": "design", "status": "running"})
+            design = await design_landing_zone(caf_input, plan_result)
+            yield evt({"step": "design", "status": "done"})
+
+            yield evt({"step": "diagram", "status": "running"})
+            run_id = uuid.uuid4().hex[:8]
+            lz_elements = generate_landing_zone_elements(design)
+            excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
+            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png")
+            diagram_info = {"run_id": run_id, "excalidraw_file": excalidraw_path, "png_file": png_path, "element_count": lz_elements["element_count"]}
+            yield evt({"step": "diagram", "status": "done"})
+
+            yield evt({"step": "report", "status": "running"})
+            report = build_caf_report(caf_input, assessment, plan_result, design, diagram_info)
+            yield evt({"step": "complete", "status": "done", "data": report})
+
+        except Exception as exc:
+            logger.exception("Streaming pipeline failed")
+            yield f"data: {json.dumps({'step': 'error', 'status': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/download/png/{run_id}")
