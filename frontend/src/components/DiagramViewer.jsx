@@ -47,6 +47,7 @@ export default function DiagramViewer({ excalidrawFile, runId }) {
           <ExcalidrawComp
             initialData={{
               elements: excalidrawFile.elements || [],
+              files: excalidrawFile.files || {},
               appState: { viewBackgroundColor: "#ffffff", zoom: { value: 0.85 } },
               scrollToContent: true,
             }}
