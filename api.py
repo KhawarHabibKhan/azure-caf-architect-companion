@@ -174,7 +174,13 @@ async def review_stream(req: ReviewRequest):
             lz_elements = generate_landing_zone_elements(design)
             excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
             png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png")
-            diagram_info = {"run_id": run_id, "excalidraw_file": excalidraw_path, "png_file": png_path, "element_count": lz_elements["element_count"]}
+            excalidraw_file = None
+            try:
+                with open(excalidraw_path, "r", encoding="utf-8") as ef:
+                    excalidraw_file = json.load(ef)
+            except Exception:
+                pass
+            diagram_info = {"run_id": run_id, "excalidraw_file": excalidraw_file, "png_file": png_path, "element_count": lz_elements["element_count"]}
             yield evt({"step": "diagram", "status": "done"})
 
             yield evt({"step": "report", "status": "running"})

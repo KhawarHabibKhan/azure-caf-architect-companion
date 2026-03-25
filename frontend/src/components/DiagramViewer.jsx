@@ -5,12 +5,28 @@ export default function DiagramViewer({ excalidrawFile, runId }) {
   const [pngBlobUrl, setPngBlobUrl] = useState(null);
   const [showInteractive, setShowInteractive] = useState(false);
   const [ExcalidrawComp, setExcalidrawComp] = useState(null);
+  const [excalidrawAPI, setExcalidrawAPI] = useState(null);
 
   useEffect(() => {
     if (runId) {
       fetchPngBlobUrl(runId).then(setPngBlobUrl);
     }
   }, [runId]);
+
+  // Scroll all elements into view once the API is ready
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    const timer = setTimeout(() => {
+      excalidrawAPI.scrollToContent(undefined, { fitToContent: true, viewportZoomFactor: 0.85 });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [excalidrawAPI]);
+
+  useEffect(() => {
+    console.log("excalidrawFile:", excalidrawFile);
+    console.log("elements count:", excalidrawFile?.elements?.length);
+    console.log("files keys:", excalidrawFile?.files ? Object.keys(excalidrawFile.files) : "none");
+  }, [excalidrawFile]);
 
   const loadExcalidraw = async () => {
     if (!ExcalidrawComp) {
@@ -45,11 +61,11 @@ export default function DiagramViewer({ excalidrawFile, runId }) {
       <div className="diagram-container">
         {showInteractive && ExcalidrawComp && excalidrawFile ? (
           <ExcalidrawComp
+            excalidrawAPI={(api) => setExcalidrawAPI(api)}
             initialData={{
               elements: excalidrawFile.elements || [],
               files: excalidrawFile.files || {},
-              appState: { viewBackgroundColor: "#ffffff", zoom: { value: 0.85 } },
-              scrollToContent: true,
+              appState: { viewBackgroundColor: "#ffffff" },
             }}
           />
         ) : pngBlobUrl ? (
