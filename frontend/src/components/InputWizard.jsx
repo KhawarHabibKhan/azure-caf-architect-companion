@@ -1,15 +1,38 @@
-import { useState } from "react";
-
-const SAMPLE = `MediTrack Health Solutions is a healthcare company with 200 employees operating out of a single on-premises data center in Chicago. They run 7 applications including a Patient Portal (React/Node.js, PostgreSQL, 5000 daily users), an EHR system (.NET, SQL Server 2TB, mission-critical), medical imaging storage (50TB DICOM), a legacy billing system on Oracle that is no longer vendor-supported, and dev/test VMs. HR is already on Workday. The team of 15 has no Azure experience. They must comply with HIPAA, have a $500K migration budget, $20K/month target, and need to complete the migration in 12 months.`;
+import { useState, useEffect, useRef } from "react";
 
 export default function InputWizard({ onSubmit, loading }) {
   const [content, setContent] = useState("");
+  const [scenarios, setScenarios] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    fetch("/api/scenarios")
+      .then((res) => res.json())
+      .then((data) => setScenarios(data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
     setContent(text);
+  };
+
+  const loadScenario = (scenario) => {
+    setContent(scenario.content);
+    setShowDropdown(false);
   };
 
   return (
@@ -32,9 +55,29 @@ export default function InputWizard({ onSubmit, loading }) {
         >
           {loading ? "Analyzing..." : "Run CAF Assessment"}
         </button>
-        <button className="btn btn-secondary" onClick={() => setContent(SAMPLE)} disabled={loading}>
-          Load Sample
-        </button>
+        <div className="scenario-dropdown" ref={dropdownRef}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowDropdown(!showDropdown)}
+            disabled={loading || scenarios.length === 0}
+          >
+            Load Scenario {showDropdown ? "\u25B4" : "\u25BE"}
+          </button>
+          {showDropdown && (
+            <div className="scenario-menu">
+              {scenarios.map((s) => (
+                <button
+                  key={s.id}
+                  className="scenario-item"
+                  onClick={() => loadScenario(s)}
+                >
+                  <span className="scenario-name">{s.name}</span>
+                  {s.industry && <span className="scenario-industry">{s.industry}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <label className="btn btn-secondary" style={{ cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}>
           Upload File
           <input type="file" accept=".txt,.md" onChange={handleFile} style={{ display: "none" }} disabled={loading} />

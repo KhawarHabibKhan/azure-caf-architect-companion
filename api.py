@@ -85,6 +85,37 @@ async def health():
     return {"status": "ok", "service": "Azure CAF Architect Companion"}
 
 
+@app.get("/api/scenarios")
+async def list_scenarios():
+    """List available demo scenarios from the scenarios/ directory."""
+    scenarios_dir = Path(__file__).parent / "scenarios"
+    if not scenarios_dir.is_dir():
+        return JSONResponse(content=[])
+
+    scenarios = []
+    for filepath in sorted(scenarios_dir.glob("*.txt")):
+        content = filepath.read_text(encoding="utf-8")
+        # Extract company name from first line (e.g. "Company: MediTrack Health Solutions")
+        first_line = content.split("\n", 1)[0]
+        name = first_line.replace("Company:", "").strip() if first_line.startswith("Company:") else filepath.stem.replace("_", " ").title()
+        # Extract industry from second line if available
+        lines = content.split("\n")
+        industry = ""
+        for line in lines[1:4]:
+            if line.startswith("Industry:"):
+                industry = line.replace("Industry:", "").strip()
+                break
+        scenarios.append({
+            "id": filepath.stem,
+            "name": name,
+            "industry": industry,
+            "filename": filepath.name,
+            "content": content,
+        })
+
+    return JSONResponse(content=scenarios)
+
+
 @app.post("/api/review")
 async def review(req: ReviewRequest):
     """Run the full 3-agent CAF pipeline."""
