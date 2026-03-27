@@ -1,14 +1,39 @@
-export default function ReportView({ summary, governance }) {
+import { useState } from "react";
+import { exportReportMarkdown } from "../api";
+
+export default function ReportView({ summary, governance, fullReport }) {
+  const [exporting, setExporting] = useState(false);
+
   if (!summary) return null;
 
   const breakdown = summary.classification_breakdown || {};
-  const recommendations = summary.prioritized_recommendations || [];
   const gov = governance || {};
+
+  const handleExport = async () => {
+    if (!fullReport) return;
+    setExporting(true);
+    try {
+      await exportReportMarkdown(fullReport);
+    } catch (err) {
+      console.error("Export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <>
       <div className="card">
-        <h3>Executive Summary</h3>
+        <div className="card-header-row">
+          <h3>Executive Summary</h3>
+          <button
+            className="btn btn-export"
+            onClick={handleExport}
+            disabled={exporting || !fullReport}
+          >
+            {exporting ? "Exporting..." : "Download Report"}
+          </button>
+        </div>
         <table>
           <tbody>
             <tr><td><strong>Company</strong></td><td>{summary.company_name}</td></tr>

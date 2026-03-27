@@ -43,3 +43,17 @@ export function downloadFile(url, filename) {
   a.click();
   document.body.removeChild(a);
 }
+
+export async function exportReportMarkdown(report) {
+  const res = await fetch(`${BASE}/export/markdown`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(report),
+  });
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const filename = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] || "caf_report.md";
+  downloadFile(url, filename);
+  URL.revokeObjectURL(url);
+}

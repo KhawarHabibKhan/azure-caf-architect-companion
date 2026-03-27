@@ -18,7 +18,7 @@ load_dotenv(override=True)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -227,6 +227,167 @@ async def review_stream(req: ReviewRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/export/markdown")
+async def export_markdown(req: dict):
+    """Convert a CAF report JSON into a downloadable Markdown document."""
+    report = req if "executive_summary" in req else req.get("report", {})
+    if not report.get("executive_summary"):
+        raise HTTPException(status_code=400, detail="Invalid report data")
+
+    md = _build_markdown_report(report)
+    company = report["executive_summary"].get("company_name", "report").replace(" ", "_")
+    filename = f"caf_report_{company}.md"
+
+    return Response(
+        content=md,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _build_markdown_report(report: dict) -> str:
+    """Format the full CAF report as a Markdown document."""
+    s = report.get("executive_summary", {})
+    lines = [
+        f"# CAF Assessment Report — {s.get('company_name', 'N/A')}",
+        "",
+        "## Executive Summary",
+        "",
+        f"| Field | Value |",
+        f"|-------|-------|",
+        f"| Industry | {s.get('industry', 'N/A')} |",
+        f"| Total Workloads | {s.get('total_workloads', 0)} |",
+        f"| Timeline | {s.get('timeline_months', 'N/A')} months |",
+        f"| Est. Monthly Cost | ${s.get('monthly_cost', 0):,.0f} |",
+        f"| Budget Status | {'Within Budget' if s.get('within_budget', True) else 'Over Budget'} |",
+        f"| Overall Readiness | {s.get('overall_readiness', 'N/A')} |",
+        f"| Risk Level | {s.get('risk_level', 'N/A')} |",
+        f"| Total Risks | {s.get('total_risks', 0)} |",
+        "",
+    ]
+
+    # Classification breakdown
+    breakdown = s.get("classification_breakdown", {})
+    if breakdown:
+        lines += ["### Classification Breakdown", ""]
+        for k, v in breakdown.items():
+            lines.append(f"- **{k.title()}**: {v}")
+        lines.append("")
+
+    # Assessment
+    assessment = report.get("assessment", {})
+    if assessment:
+        lines += ["## Readiness Assessment", ""]
+        scores = assessment.get("readiness_scores", {})
+        if scores:
+            lines += ["| Dimension | Score |", "|-----------|-------|"]
+            for dim, score in scores.items():
+                label = dim.replace("_", " ").title()
+                lines.append(f"| {label} | {score} |")
+            lines.append("")
+        if assessment.get("readiness_summary"):
+            lines += [assessment["readiness_summary"], ""]
+        model = assessment.get("operating_model", {})
+        if model.get("recommended"):
+            lines += [
+                "### Operating Model",
+                "",
+                f"**Recommended:** {model['recommended']}",
+                "",
+                model.get("rationale", ""),
+                "",
+            ]
+        skills = assessment.get("skills_assessment", [])
+        if skills:
+            lines += [
+                "### Skills Assessment",
+                "",
+                "| Role | Gap | Training | Priority |",
+                "|------|-----|----------|----------|",
+            ]
+            for sk in skills:
+                lines.append(f"| {sk.get('role', '')} | {sk.get('gap', '')} | {sk.get('recommended_training', '')} | {sk.get('priority', '')} |")
+            lines.append("")
+
+    # Workload plan
+    plan = report.get("plan", {})
+    workloads = plan.get("workload_inventory", [])
+    if workloads:
+        lines += [
+            "## Workload Classification (7 R's)",
+            "",
+            "| Workload | Classification | Effort | Target Services | Rationale |",
+            "|----------|---------------|--------|-----------------|-----------|",
+        ]
+        for w in workloads:
+            services = ", ".join((w.get("target_azure_services") or [])[:3])
+            lines.append(f"| {w.get('workload_name', '')} | {w.get('classification', '')} | {w.get('estimated_effort', '')} | {services} | {w.get('rationale', '')} |")
+        lines.append("")
+
+    waves = plan.get("migration_waves", [])
+    if waves:
+        lines += [
+            "## Migration Wave Plan",
+            "",
+            "| Wave | Timeline | Workloads | Rationale |",
+            "|------|----------|-----------|-----------|",
+        ]
+        for w in waves:
+            wk = ", ".join(w.get("workloads") or [])
+            lines.append(f"| Wave {w.get('wave_number', '')} | {w.get('timeline', '')} | {wk} | {w.get('rationale', '')} |")
+        lines.append("")
+
+    # Cost estimation
+    costs = report.get("cost_estimation", {})
+    cost_items = costs.get("line_items", [])
+    if cost_items:
+        lines += [
+            "## Cost Estimation",
+            "",
+            f"**Total Monthly Cost:** ${costs.get('total_monthly', 0):,.0f}",
+            "",
+            "| Workload | Azure Service | Monthly Cost | Notes |",
+            "|----------|--------------|-------------|-------|",
+        ]
+        for item in cost_items:
+            lines.append(f"| {item.get('category', '')} | {item.get('azure_service', '')} | ${item.get('monthly_cost', 0):,.0f} | {item.get('notes', '')} |")
+        lines.append("")
+
+    # Risk register
+    risks = report.get("risk_register", [])
+    if risks:
+        lines += [
+            f"## Risk Register ({len(risks)} risks)",
+            "",
+            "| ID | Risk | Category | Probability | Impact | Priority | Mitigation |",
+            "|----|------|----------|-------------|--------|----------|------------|",
+        ]
+        for r in risks:
+            lines.append(f"| {r.get('id', '')} | {r.get('risk', '')} | {r.get('category', '')} | {r.get('probability', '')} | {r.get('impact', '')} | {r.get('priority', '')} | {r.get('mitigation', '')} |")
+        lines.append("")
+
+    # Governance
+    gov = report.get("governance_recommendations", {})
+    if gov:
+        lines += ["## Governance Recommendations", ""]
+        for section in ["policies", "security", "cost_management"]:
+            items = gov.get(section, [])
+            if items:
+                lines.append(f"### {section.replace('_', ' ').title()}")
+                lines.append("")
+                for item in items:
+                    lines.append(f"- {item}")
+                lines.append("")
+
+    lines += [
+        "---",
+        "",
+        "*Generated by Azure CAF Architect Companion*",
+    ]
+
+    return "\n".join(lines)
 
 
 @app.get("/api/download/png/{run_id}")

@@ -124,7 +124,7 @@ export default function App() {
           {activeTab === "Costs" && <CostBreakdown data={report.cost_estimation} />}
           {activeTab === "Risks" && <RiskRegister risks={report.risk_register} />}
           {activeTab === "Architecture" && <DiagramViewer excalidrawFile={report.diagram?.excalidraw_file} runId={report.diagram?.run_id} />}
-          {activeTab === "Report" && <ReportView summary={report.executive_summary} governance={report.governance_recommendations} />}
+          {activeTab === "Report" && <ReportView summary={report.executive_summary} governance={report.governance_recommendations} fullReport={report} />}
         </>
       )}
     </div>
