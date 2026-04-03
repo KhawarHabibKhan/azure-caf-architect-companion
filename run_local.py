@@ -35,6 +35,7 @@ from tools import (
     design_landing_zone,
     generate_landing_zone_elements,
     generate_mcp_landing_zone_elements,
+    refine_diagram_layout,
     save_excalidraw_file,
     export_landing_zone_png,
     render_via_excalidraw_mcp,
@@ -158,6 +159,11 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
     console.print()
     console.print("[dim]Step 5:[/dim] Generating architecture diagram...")
     lz_elements = generate_landing_zone_elements(design, plan.get("workload_inventory", []))
+
+    # Step 5a: Diagram QA — LLM reviews and fixes layout
+    console.print("  [dim]\u21b3 Running diagram QA agent...[/dim]")
+    lz_elements["elements_json"] = await refine_diagram_layout(lz_elements["elements_json"])
+    console.print("  [green]\u2713 Layout refined[/green]")
 
     import uuid
     run_id = uuid.uuid4().hex[:8]

@@ -29,6 +29,7 @@ from tools import (
     design_landing_zone,
     generate_landing_zone_elements,
     generate_mcp_landing_zone_elements,
+    refine_diagram_layout,
     save_excalidraw_file,
     export_landing_zone_png,
     render_via_excalidraw_mcp,
@@ -205,6 +206,7 @@ async def review_stream(req: ReviewRequest):
             yield evt({"step": "diagram", "status": "running"})
             run_id = uuid.uuid4().hex[:8]
             lz_elements = generate_landing_zone_elements(design, plan_result.get("workload_inventory", []))
+            lz_elements["elements_json"] = await refine_diagram_layout(lz_elements["elements_json"])
             excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
             png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png", workloads=plan_result.get("workload_inventory", []))
             excalidraw_file = None

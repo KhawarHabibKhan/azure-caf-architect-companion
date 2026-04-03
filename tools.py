@@ -13,6 +13,7 @@ Sections:
   5a. MCP Diagram Renderer (Excalidraw MCP Server Integration)
   6. PNG Export
   7. File Save Helpers
+  7a. Diagram QA Agent (LLM-powered layout review & fix)
   8. Report Builder
   9. Pipeline Orchestrator
 """
@@ -1784,6 +1785,118 @@ def save_excalidraw_file(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  7a.  DIAGRAM QA AGENT (LLM-powered layout review & fix)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_DIAGRAM_QA_PROMPT = """You are a diagram layout QA agent. You receive Excalidraw JSON elements
+representing an Azure landing zone architecture diagram.
+
+Your job is to review the layout and fix any issues:
+
+1. **Overlapping text** — If a text element overflows its parent rectangle, either:
+   - Shorten the text (abbreviate Azure service names, use line breaks)
+   - Increase the parent rectangle's width or height
+   - Adjust the text's x/y position to center it properly
+
+2. **Overlapping elements** — If two rectangles or groups overlap, adjust positions
+   to add proper spacing (minimum 20px gap between elements).
+
+3. **Text sizing** — If text is too long for its container, abbreviate it:
+   - "Azure Database for PostgreSQL - Flexible Server" → "PostgreSQL"
+   - "Azure App Service" → "App Service"
+   - "Azure Cache for Redis" → "Redis Cache"
+   - "Azure Data Lake Storage Gen2" → "Data Lake"
+
+4. **Container sizing** — Ensure parent rectangles (spokes, hub) are large enough
+   to contain all their child elements with padding.
+
+5. **Arrow clarity** — Ensure arrows don't cross through unrelated elements.
+   Adjust start/end points if needed.
+
+6. **Readable spacing** — Ensure at least 30px between section zones (management
+   groups, network topology, identity/governance).
+
+RULES:
+- Return ONLY the corrected elements array as valid JSON (no markdown fences, no explanation)
+- Keep ALL element IDs the same — only modify positions, sizes, and text content
+- Do NOT add or remove elements — only fix existing ones
+- Do NOT change colors, types, or structural relationships
+- Preserve the cameraUpdate element (adjust if the diagram bounds changed)
+- Keep the diagram compact but readable
+"""
+
+
+async def refine_diagram_layout(elements_json: str) -> str:
+    """Send Excalidraw elements to the LLM for layout QA and fixes.
+
+    Returns corrected elements_json string. Falls back to the original
+    if the LLM call fails or returns invalid JSON.
+    """
+    # Strip pseudo-elements and icon metadata to reduce token count
+    elements = json.loads(elements_json)
+    camera = None
+    compact_elems = []
+    for e in elements:
+        if e.get("type") == "cameraUpdate":
+            camera = e
+            continue
+        # Strip fields the LLM doesn't need for layout analysis
+        slim = {}
+        for k in ("type", "id", "x", "y", "width", "height", "text",
+                   "fontSize", "textAlign", "strokeColor", "backgroundColor",
+                   "points", "strokeStyle", "label", "groupIds"):
+            if k in e:
+                slim[k] = e[k]
+        compact_elems.append(slim)
+
+    compact_json = json.dumps(compact_elems, separators=(",", ":"))
+    logger.debug("[DiagramQA] Sending %d elements (%d chars) to LLM",
+                 len(compact_elems), len(compact_json))
+
+    try:
+        result = await _llm_call(_DIAGRAM_QA_PROMPT, compact_json)
+    except Exception as exc:
+        logger.warning("[DiagramQA] LLM call failed: %s — using original", exc)
+        return elements_json
+
+    # Result should be a list of elements
+    if isinstance(result, dict) and "error" in result:
+        logger.warning("[DiagramQA] LLM returned error: %s", result["error"])
+        return elements_json
+
+    fixed_elems = result if isinstance(result, list) else []
+    if not fixed_elems:
+        logger.warning("[DiagramQA] LLM returned empty or invalid result")
+        return elements_json
+
+    # Merge LLM fixes back into original elements (preserve fields LLM didn't see)
+    fixed_by_id = {e.get("id"): e for e in fixed_elems if "id" in e}
+    merged = []
+    if camera:
+        # Check if LLM returned an updated camera
+        cam_fix = fixed_by_id.pop("camera", None)
+        if cam_fix and cam_fix.get("type") == "cameraUpdate":
+            camera.update(cam_fix)
+        merged.append(camera)
+
+    for orig in elements:
+        if orig.get("type") == "cameraUpdate":
+            continue
+        eid = orig.get("id")
+        fix = fixed_by_id.get(eid)
+        if fix:
+            # Apply position/size/text fixes while keeping everything else
+            for k in ("x", "y", "width", "height", "text", "fontSize",
+                       "points", "label"):
+                if k in fix:
+                    orig[k] = fix[k]
+        merged.append(orig)
+
+    logger.debug("[DiagramQA] Merged %d fixed elements", len(merged))
+    return json.dumps(merged)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  8.  REPORT BUILDER
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1871,6 +1984,11 @@ async def run_full_pipeline(content: str) -> dict[str, Any]:
     run_id = uuid.uuid4().hex[:8]
     workloads = plan.get("workload_inventory", [])
     lz_elements = generate_landing_zone_elements(design, workloads)
+
+    # Step 4a: Diagram QA — LLM reviews and fixes layout issues
+    lz_elements["elements_json"] = await refine_diagram_layout(
+        lz_elements["elements_json"]
+    )
 
     excalidraw_path = save_excalidraw_file(
         lz_elements["elements_json"],
