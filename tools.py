@@ -876,123 +876,30 @@ _BOX_W, _BOX_H = 180, 85
 _MG_W, _MG_H = 200, 70
 
 
-def _az_svg_data_url(svg: str) -> str:
-    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+from knowledge.azure_icons import CATEGORY_ICONS, SERVICE_ICONS, SERVICE_NAME_TO_ICON
+
+# Azure service icons — real Microsoft Azure architecture icons (SVG)
+_AZ_ICON_SVGS: dict[str, str] = {**CATEGORY_ICONS, **SERVICE_ICONS}
 
 
-# Azure service icons keyed by color_key
-_AZ_ICON_SVGS: dict[str, str] = {
-    "management_group": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#1565c0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="8" y="2" width="8" height="5" rx="1"/>'
-        '<rect x="1" y="17" width="6" height="5" rx="1"/>'
-        '<rect x="9" y="17" width="6" height="5" rx="1"/>'
-        '<rect x="17" y="17" width="6" height="5" rx="1"/>'
-        '<line x1="12" y1="7" x2="12" y2="11"/>'
-        '<line x1="4" y1="11" x2="20" y2="11"/>'
-        '<line x1="4" y1="11" x2="4" y2="17"/>'
-        '<line x1="12" y1="11" x2="12" y2="17"/>'
-        '<line x1="20" y1="11" x2="20" y2="17"/>'
-        "</svg>"
-    ),
-    "subscription": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#2e7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<polyline points="12 2 2 7 12 12 22 7 12 2"/>'
-        '<polyline points="2 17 12 22 22 17"/>'
-        '<polyline points="2 12 12 17 22 12"/>'
-        "</svg>"
-    ),
-    "vnet_hub": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#7b1fa2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/>'
-        '<circle cx="18" cy="19" r="3"/>'
-        '<line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>'
-        '<line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>'
-        "</svg>"
-    ),
-    "vnet_spoke": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#512da8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<line x1="6" y1="3" x2="6" y2="15"/>'
-        '<circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>'
-        '<path d="M18 9a9 9 0 0 1-9 9"/>'
-        "</svg>"
-    ),
-    "compute": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#e65100" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="4" y="4" width="16" height="16" rx="2"/>'
-        '<rect x="9" y="9" width="6" height="6"/>'
-        '<line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/>'
-        '<line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/>'
-        '<line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="14" x2="22" y2="14"/>'
-        '<line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="14" x2="4" y2="14"/>'
-        "</svg>"
-    ),
-    "database": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#f9a825" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<ellipse cx="12" cy="5" rx="9" ry="3"/>'
-        '<path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>'
-        '<path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>'
-        "</svg>"
-    ),
-    "storage": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#00838f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>'
-        '<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>'
-        '<line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'
-        "</svg>"
-    ),
-    "security": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#c62828" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>'
-        '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
-        "</svg>"
-    ),
-    "networking": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#6a1b9a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<path d="M5 12.55a11 11 0 0 1 14.08 0"/>'
-        '<path d="M1.42 9a16 16 0 0 1 21.16 0"/>'
-        '<path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>'
-        '<circle cx="12" cy="20" r="1"/>'
-        "</svg>"
-    ),
-    "identity": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#283593" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>'
-        '<circle cx="12" cy="7" r="4"/>'
-        "</svg>"
-    ),
-    "on_premises": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#455a64" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>'
-        '<path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'
-        "</svg>"
-    ),
-    "monitoring": _az_svg_data_url(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
-        ' stroke="#558b2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        '<line x1="18" y1="20" x2="18" y2="10"/>'
-        '<line x1="12" y1="20" x2="12" y2="4"/>'
-        '<line x1="6" y1="20" x2="6" y2="14"/>'
-        "</svg>"
-    ),
-}
+def _resolve_icon_key(label: str, color_key: str) -> str | None:
+    """Find the best icon key for a given label, falling back to color_key."""
+    label_lower = label.lower()
+    # Check service name mappings first (most specific)
+    for keyword, icon_key in SERVICE_NAME_TO_ICON.items():
+        if keyword in label_lower:
+            if icon_key in _AZ_ICON_SVGS:
+                return icon_key
+    # Fall back to color_key (category icon)
+    if color_key in _AZ_ICON_SVGS:
+        return color_key
+    return None
 
 
 def _az_rect(
     elem_id: str, label: str, color_key: str,
     x: int, y: int, w: int = _BOX_W, h: int = _BOX_H,
-    dashed: bool = False,
+    dashed: bool = False, icon_key: str | None = None,
 ) -> list[dict]:
     """Create an Excalidraw rectangle with an icon and centered label."""
     col = _AZURE_COLORS.get(color_key, _AZ_DEFAULT_COL)
@@ -1006,20 +913,26 @@ def _az_rect(
     }
     if dashed:
         rect["strokeStyle"] = "dashed"
-    # Icon — show for standard-sized boxes (not oversized hub/spoke containers)
     elems: list[dict] = [rect]
-    if h in (_BOX_H, _MG_H) and color_key in _AZ_ICON_SVGS:
-        icon_size = 24
+
+    # Resolve which icon to use
+    resolved_icon = icon_key or _resolve_icon_key(label, color_key)
+
+    # Show icon on standard boxes and small service boxes (not oversized containers)
+    show_icon = resolved_icon and h <= _BOX_H
+    if show_icon:
+        icon_size = 20 if h <= 40 else 24
         icon_x = x + (w - icon_size) // 2
+        icon_y = y + 4 if h <= 40 else y + 6
         elems.append({
             "type": "image", "id": f"{elem_id}_icon",
-            "x": icon_x, "y": y + 6, "width": icon_size, "height": icon_size,
+            "x": icon_x, "y": icon_y, "width": icon_size, "height": icon_size,
             "angle": 0, "strokeColor": "transparent", "backgroundColor": "transparent",
             "fillStyle": "hachure", "strokeWidth": 1, "roughness": 1, "opacity": 100,
-            "groupIds": [grp], "fileId": f"az_icon_{color_key}",
+            "groupIds": [grp], "fileId": f"az_icon_{resolved_icon}",
             "scale": [1, 1], "status": "saved", "isDeleted": False,
         })
-        text_y = y + 34
+        text_y = icon_y + icon_size + 2
     else:
         text_y = y + (h // 2) - 10
     elems.append({
@@ -1194,7 +1107,7 @@ def _render_hub_spoke(
     spoke_col_w = 300
     spoke_gap_x = 40
     spoke_gap_y = 20
-    svc_box_w, svc_box_h = 130, 32
+    svc_box_w, svc_box_h = 130, 50
 
     # Place spokes in 2-column grid
     cols_count = min(3, max(1, len(spokes)))
