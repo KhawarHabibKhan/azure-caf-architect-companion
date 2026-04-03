@@ -14,6 +14,7 @@ Describe your current IT environment — infrastructure, applications, team, bud
 6. **Governance Recommendations** — Azure Policy, tagging strategy, security baseline, cost management
 7. **Landing Zone Design** — Management group hierarchy, hub-spoke network, subscription layout
 8. **Architecture Diagram** — Interactive Excalidraw diagram + PNG export
+9. **Report Export** — Download the full assessment as a formatted Markdown document
 
 ## 3-Agent Pipeline
 
@@ -93,8 +94,8 @@ azure-caf-architect-companion/
 │   ├── azure_services.json      # Azure service catalog
 │   ├── compliance_controls.json # Compliance frameworks
 │   └── caf_prompts.py           # Agent system prompts
-├── frontend/             # React + Vite + Excalidraw
-├── scenarios/            # Demo inputs
+├── frontend/             # React + Vite + Excalidraw (scenario selector, report export)
+├── scenarios/            # Demo inputs (served via /api/scenarios)
 ├── tests/                # Pytest suite
 └── output/               # Generated diagrams and reports
 ```
@@ -105,8 +106,11 @@ azure-caf-architect-companion/
 |--------|------|---------|
 | GET | `/api/health` | Health check |
 | POST | `/api/review` | Full pipeline (all 3 agents) |
+| POST | `/api/review/stream` | Full pipeline with SSE streaming progress |
 | POST | `/api/assess` | Agent 1 only |
 | POST | `/api/plan` | Agent 1 + Agent 2 |
+| GET | `/api/scenarios` | List available demo scenarios |
+| POST | `/api/export/markdown` | Export full report as downloadable Markdown |
 | GET | `/api/download/png/{run_id}` | Download PNG diagram |
 | GET | `/api/download/excalidraw/{run_id}` | Download Excalidraw file |
 

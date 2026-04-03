@@ -28,8 +28,10 @@ from tools import (
     run_plan,
     design_landing_zone,
     generate_landing_zone_elements,
+    generate_mcp_landing_zone_elements,
     save_excalidraw_file,
     export_landing_zone_png,
+    render_via_excalidraw_mcp,
     build_caf_report,
     run_full_pipeline,
 )
@@ -202,9 +204,9 @@ async def review_stream(req: ReviewRequest):
 
             yield evt({"step": "diagram", "status": "running"})
             run_id = uuid.uuid4().hex[:8]
-            lz_elements = generate_landing_zone_elements(design)
+            lz_elements = generate_landing_zone_elements(design, plan_result.get("workload_inventory", []))
             excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
-            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png")
+            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png", workloads=plan_result.get("workload_inventory", []))
             excalidraw_file = None
             try:
                 with open(excalidraw_path, "r", encoding="utf-8") as ef:
@@ -212,6 +214,14 @@ async def review_stream(req: ReviewRequest):
             except Exception:
                 pass
             diagram_info = {"run_id": run_id, "excalidraw_file": excalidraw_file, "png_file": png_path, "element_count": lz_elements["element_count"]}
+
+            # MCP rendering (optional, non-blocking)
+            try:
+                mcp_elems = generate_mcp_landing_zone_elements(design)
+                mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
+                diagram_info["mcp_render"] = mcp_result
+            except Exception:
+                logger.debug("MCP rendering skipped")
             yield evt({"step": "diagram", "status": "done"})
 
             yield evt({"step": "report", "status": "running"})

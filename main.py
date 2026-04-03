@@ -17,7 +17,13 @@ load_dotenv(override=True)
 from agent_framework.azure import AzureAIAgentClient
 from azure.identity.aio import AzureCliCredential
 
-from tools import run_full_pipeline, parse_caf_input, run_assessment
+from tools import (
+    run_full_pipeline,
+    parse_caf_input,
+    run_assessment,
+    generate_mcp_landing_zone_elements,
+    render_via_excalidraw_mcp,
+)
 
 PROJECT_ENDPOINT = os.getenv("AZURE_AI_PROJECT_ENDPOINT") or os.getenv("PROJECT_ENDPOINT")
 MODEL_DEPLOYMENT_NAME = os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME") or os.getenv(
@@ -31,6 +37,7 @@ MODEL_DEPLOYMENT_NAME = os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME") or os.getenv
 
 async def run_cloud_adoption_review(
     content: Annotated[str, "Description of the organization's current IT infrastructure, applications, team, budget, and timeline. Any format: plaintext, structured, bullet points, etc."],
+    render_diagram: bool = True,
 ) -> str:
     """Run a complete Cloud Adoption Framework assessment.
 
@@ -42,6 +49,13 @@ async def run_cloud_adoption_review(
     landing zone architecture, and Excalidraw diagram.
     """
     report = await run_full_pipeline(content)
+
+    if render_diagram and report.get("landing_zone"):
+        mcp_elems = generate_mcp_landing_zone_elements(report["landing_zone"])
+        mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
+        if report.get("diagram"):
+            report["diagram"]["mcp_render"] = mcp_result
+
     return json.dumps(report, indent=2, default=str)
 
 

@@ -10,6 +10,7 @@ Sections:
   3. Plan & Analyze Engine (Agent 2)
   4. Design Engine (Agent 3)
   5. Excalidraw Landing Zone Renderer
+  5a. MCP Diagram Renderer (Excalidraw MCP Server Integration)
   6. PNG Export
   7. File Save Helpers
   8. Report Builder
@@ -18,6 +19,7 @@ Sections:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -1097,47 +1099,392 @@ def _render_mgmt_group_tree(
     return elems, child_x
 
 
+def _section_header(elem_id: str, text: str, x: int, y: int, w: int = 600) -> list[dict]:
+    """Create a section header label."""
+    return [{
+        "type": "text", "id": elem_id,
+        "x": x, "y": y, "width": w, "height": 28,
+        "text": text, "fontSize": 20, "fontFamily": 1,
+        "textAlign": "left", "strokeColor": "#1565c0",
+    }]
+
+
+def _service_color_key(service_name: str) -> str:
+    """Map an Azure service name to a color key."""
+    s = service_name.lower()
+    if any(k in s for k in ("sql", "database", "postgres", "mysql", "cosmos", "redis")):
+        return "database"
+    if any(k in s for k in ("storage", "blob", "data lake", "file")):
+        return "storage"
+    if any(k in s for k in ("vm", "virtual machine", "container", "app service", "function")):
+        return "compute"
+    if any(k in s for k in ("monitor", "log analytics", "insight", "sentinel")):
+        return "monitoring"
+    if any(k in s for k in ("firewall", "defender", "key vault", "waf")):
+        return "security"
+    if any(k in s for k in ("vnet", "gateway", "dns", "front door", "load balancer")):
+        return "networking"
+    if any(k in s for k in ("entra", "identity", "ad ")):
+        return "identity"
+    return "compute"
+
+
 def _render_hub_spoke(
     network: dict, x: int, y: int,
-) -> list[dict]:
-    """Render hub-spoke network topology."""
+    workloads: list[dict] | None = None,
+) -> tuple[list[dict], int]:
+    """Render hub-spoke network topology with workload details.
+
+    Returns (elements, bottom_y) so the caller knows where the zone ends.
+    """
     elems: list[dict] = []
     hub = network.get("hub_vnet", {})
     spokes = network.get("spoke_vnets", [])
     on_prem = network.get("on_prem_connectivity", "VPN")
 
-    # Hub VNet — larger box
-    hub_w, hub_h = 280, 160
+    # Build workload lookup: workload_name -> target_azure_services
+    wl_list = workloads or []
+    wl_services: dict[str, list[str]] = {}
+    for w in wl_list:
+        wl_services[w.get("workload_name", "")] = w.get("target_azure_services", [])
+
+    # ── Hub VNet ─────────────────────────────────────────────────────────
+    components = hub.get("components", [])
+    cols = min(len(components), 2)
+    rows = math.ceil(len(components) / max(cols, 1))
+    hub_comp_w, hub_comp_h = 140, 40
+    hub_pad = 15
+    hub_w = max(320, cols * (hub_comp_w + hub_pad) + hub_pad * 2)
+    hub_h = 65 + rows * (hub_comp_h + 10) + hub_pad
+
     hub_name = hub.get("name", "Hub VNet")
     hub_cidr = hub.get("cidr", "10.0.0.0/16")
     elems.extend(_az_rect("hub_vnet", f"{hub_name}\n{hub_cidr}", "vnet_hub",
                           x, y, hub_w, hub_h, dashed=True))
 
-    # Hub components inside
-    components = hub.get("components", [])
-    comp_x = x + 15
-    comp_y = y + 55
+    # Hub components inside — 2-column grid
     for i, comp_name in enumerate(components):
-        comp_id = f"hub_comp_{i}"
-        ctype = "security" if "firewall" in comp_name.lower() else "networking"
-        elems.extend(_az_rect(comp_id, comp_name, ctype,
-                              comp_x, comp_y, 120, 35))
-        comp_x += 130
+        col_i = i % cols
+        row_i = i // cols
+        cx = x + hub_pad + col_i * (hub_comp_w + hub_pad)
+        cy = y + 60 + row_i * (hub_comp_h + 10)
+        ctype = "security" if any(k in comp_name.lower() for k in ("firewall", "waf", "defender")) else "networking"
+        elems.extend(_az_rect(f"hub_comp_{i}", comp_name, ctype,
+                              cx, cy, hub_comp_w, hub_comp_h))
 
-    # On-premises connection (left of hub)
-    on_prem_x = x - 220
-    on_prem_y = y + hub_h // 2 - 30
-    elems.extend(_az_rect("on_prem", "On-Premises", "on_premises",
+    hub_cx = x + hub_w // 2
+    hub_cy = y + hub_h // 2
+
+    # ── On-premises ──────────────────────────────────────────────────────
+    on_prem_x = x - 250
+    on_prem_y = y + hub_h // 2 - _BOX_H // 2
+    elems.extend(_az_rect("on_prem", f"On-Premises\nData Center", "on_premises",
                           on_prem_x, on_prem_y))
     elems.extend(_az_arrow("on_prem_to_hub",
                            on_prem_x + _BOX_W, on_prem_y + _BOX_H // 2,
-                           x, y + hub_h // 2,
+                           x, hub_cy,
                            on_prem, dashed=True))
 
-    # Spoke VNets — arranged in an arc to the right
-    if spokes:
-        spoke_start_y = y - 40
-        spoke_x = x + hub_w + 80
+    # ── Spokes — 2-column grid (prod left, non-prod right) ──────────────
+    if not spokes:
+        return elems, y + hub_h
+
+    spoke_start_y = y + hub_h + 60
+    spoke_col_w = 300
+    spoke_gap_x = 40
+    spoke_gap_y = 20
+    svc_box_w, svc_box_h = 130, 32
+
+    # Place spokes in 2-column grid
+    cols_count = min(3, max(1, len(spokes)))
+    bottom_y = spoke_start_y
+
+    for i, spoke in enumerate(spokes):
+        col_i = i % cols_count
+        row_i = i // cols_count
+        spoke_id = f"spoke_{i}"
+
+        # Figure out services for this spoke (fuzzy match — spoke name may
+        # combine multiple workloads like "App / API (Production)")
+        wl_name = spoke.get("workload", "")
+        services: list[str] = []
+        for plan_name, plan_svcs in wl_services.items():
+            if plan_name.lower() in wl_name.lower() or wl_name.lower() in plan_name.lower():
+                for s in plan_svcs:
+                    if s not in services:
+                        services.append(s)
+        services = services[:4]  # max 4 services shown
+
+        # Spoke box sizing — taller if it has services
+        svc_rows = math.ceil(len(services) / 2) if services else 0
+        spoke_h = 55 + svc_rows * (svc_box_h + 8) + (15 if services else 0)
+        spoke_w = spoke_col_w
+
+        spoke_x = x - (cols_count * (spoke_col_w + spoke_gap_x)) // 2 + hub_w // 2 + col_i * (spoke_col_w + spoke_gap_x)
+        spoke_y = spoke_start_y + row_i * (spoke_h + spoke_gap_y + 10)
+
+        spoke_name = spoke.get("name", f"Spoke {i}")
+        spoke_cidr = spoke.get("cidr", "")
+        spoke_workload = spoke.get("workload", "")
+        spoke_title = spoke_workload if spoke_workload else spoke_name
+        spoke_subtitle = spoke_cidr
+        spoke_label = f"{spoke_title}\n{spoke_subtitle}" if spoke_subtitle else spoke_title
+
+        elems.extend(_az_rect(spoke_id, spoke_label, "vnet_spoke",
+                              spoke_x, spoke_y, spoke_w, spoke_h, dashed=True))
+
+        # Peering arrow from hub bottom to spoke top
+        elems.extend(_az_arrow(
+            f"hub_to_{spoke_id}",
+            hub_cx, y + hub_h,
+            spoke_x + spoke_w // 2, spoke_y,
+            "peering",
+        ))
+
+        # Azure services inside spoke — 2-column mini-grid
+        if services:
+            for j, svc in enumerate(services):
+                svc_col = j % 2
+                svc_row = j // 2
+                svc_x = spoke_x + 10 + svc_col * (svc_box_w + 10)
+                svc_y = spoke_y + 50 + svc_row * (svc_box_h + 8)
+                svc_color = _service_color_key(svc)
+                # Shorten long names
+                svc_short = svc.replace("Azure ", "").replace(" - Flexible Server", "")
+                elems.extend(_az_rect(
+                    f"{spoke_id}_svc_{j}", svc_short, svc_color,
+                    svc_x, svc_y, svc_box_w, svc_box_h,
+                ))
+
+        bottom_y = max(bottom_y, spoke_y + spoke_h)
+
+    return elems, bottom_y
+
+
+def generate_landing_zone_elements(
+    design: dict[str, Any],
+    workloads: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Build Excalidraw elements for the full landing zone architecture.
+
+    Layout:
+      Zone 1: Title
+      Zone 2: Management group hierarchy
+      Zone 3: Hub-spoke network with workload details
+      Zone 4: Identity & Governance info panels
+
+    Returns {"elements_json": str, "element_count": int}.
+    """
+    elems: list[dict] = []
+    cursor_y = 0
+
+    # ── Zone 1: Title ────────────────────────────────────────────────────
+    elems.append({
+        "type": "text", "id": "title",
+        "x": 0, "y": cursor_y, "width": 600, "height": 32,
+        "text": "Azure Landing Zone Architecture", "fontSize": 24, "fontFamily": 1,
+        "textAlign": "left", "strokeColor": "#1e1e1e",
+    })
+    cursor_y += 50
+
+    # ── Zone 2: Management group hierarchy ───────────────────────────────
+    mg = design.get("management_groups", {})
+    root = mg.get("root", mg)
+    if root:
+        elems.extend(_section_header("hdr_mg", "Management Group Hierarchy", 0, cursor_y))
+        cursor_y += 40
+        mg_elems, mg_width = _render_mgmt_group_tree(root, 0, cursor_y)
+        elems.extend(mg_elems)
+        # Calculate MG tree height (deepest leaf)
+        mg_ys = [e.get("y", 0) + e.get("height", 0) for e in mg_elems if e.get("type") == "rectangle"]
+        mg_bottom = max(mg_ys) if mg_ys else cursor_y + 200
+        cursor_y = mg_bottom + 60
+
+    # ── Zone 3: Hub-spoke network ────────────────────────────────────────
+    network = design.get("network_design", {})
+    if network:
+        elems.extend(_section_header("hdr_network", "Network Topology (Hub & Spoke)", 0, cursor_y))
+        cursor_y += 40
+        hub_spoke_elems, bottom_y = _render_hub_spoke(network, 200, cursor_y, workloads)
+        elems.extend(hub_spoke_elems)
+        cursor_y = bottom_y + 60
+
+    # ── Zone 4: Identity & Governance panels ─────────────────────────────
+    identity = design.get("identity_design", {})
+    governance = design.get("governance_baseline", {})
+
+    if identity or governance:
+        elems.extend(_section_header("hdr_infra", "Identity & Governance", 0, cursor_y))
+        cursor_y += 40
+        panel_x = 0
+
+        if identity:
+            provider = identity.get("provider", "Microsoft Entra ID")
+            tier = identity.get("tier", "")
+            features = identity.get("features", [])[:5]
+            id_text = f"{provider}" + (f" ({tier})" if tier else "")
+            if features:
+                id_text += "\n" + "\n".join(f"• {f}" for f in features)
+            id_h = 40 + len(features) * 18
+            elems.extend(_az_rect("panel_identity", id_text, "identity",
+                                  panel_x, cursor_y, 280, max(id_h, 80)))
+            panel_x += 310
+
+        if governance:
+            policies = governance.get("policy_assignments", [])[:5]
+            gov_text = "Azure Policy"
+            if policies:
+                gov_text += "\n" + "\n".join(f"• {p}" for p in policies)
+            gov_h = 40 + len(policies) * 18
+            elems.extend(_az_rect("panel_governance", gov_text, "security",
+                                  panel_x, cursor_y, 320, max(gov_h, 80)))
+
+    # ── Camera ───────────────────────────────────────────────────────────
+    if elems:
+        all_x = [e.get("x", 0) for e in elems if "x" in e]
+        all_y = [e.get("y", 0) for e in elems if "y" in e]
+        all_r = [e.get("x", 0) + e.get("width", 0) for e in elems if "width" in e]
+        all_b = [e.get("y", 0) + e.get("height", 0) for e in elems if "height" in e]
+        if all_x and all_y:
+            cam_x = min(all_x) - 60
+            cam_y = min(all_y) - 40
+            cam_w = max(all_r) - cam_x + 60
+            cam_h = max(all_b) - cam_y + 60
+            elems.insert(0, {
+                "type": "cameraUpdate",
+                "x": cam_x, "y": cam_y,
+                "width": cam_w, "height": cam_h,
+            })
+
+    return {"elements_json": json.dumps(elems), "element_count": len(elems)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  5a.  MCP DIAGRAM RENDERER (Excalidraw MCP Server Integration)
+# ═══════════════════════════════════════════════════════════════════════════
+
+EXCALIDRAW_MCP_URL = os.environ.get(
+    "EXCALIDRAW_MCP_URL", "https://excalidraw-mcp-app.vercel.app/mcp"
+)
+
+
+def generate_mcp_landing_zone_elements(design: dict[str, Any]) -> dict[str, Any]:
+    """Build Excalidraw elements optimised for MCP ``create_view`` streaming.
+
+    Uses **labeled shapes** (one element per node instead of three) and
+    **progressive ordering** (shape → arrows from shape → next shape)
+    per the MCP server's ``read_me`` best-practices.
+
+    Adapts the landing zone design (management groups + hub-spoke) for MCP.
+    """
+    elems: list[dict] = []
+
+    # ── Camera (4:3 ratio required) ──────────────────────────────────────
+    # Will be set after all elements are generated
+
+    mg = design.get("management_groups", {})
+    root = mg.get("root", mg)
+    arrows: list[dict] = []
+
+    # ── Management group hierarchy (flat progressive emit) ───────────────
+    def _emit_mg(node: dict, x: int, y: int, depth: int = 0, parent_id: str | None = None) -> int:
+        name = node.get("name", "Unknown")
+        node_id = f"mg_{name.lower().replace(' ', '_')}_{depth}"
+        w = max(_MG_W, len(name) * 10 + 20)
+
+        elems.append({
+            "type": "rectangle", "id": node_id,
+            "x": x, "y": y, "width": w, "height": _MG_H,
+            "strokeColor": _AZURE_COLORS["management_group"]["border"],
+            "backgroundColor": _AZURE_COLORS["management_group"]["bg"],
+            "fillStyle": "solid", "roundness": {"type": 3},
+            "label": {"text": name, "fontSize": 14},
+        })
+
+        if parent_id:
+            arrows.append({
+                "type": "arrow", "id": f"{parent_id}_to_{node_id}",
+                "x": 0, "y": 0, "width": 1, "height": 1,
+                "strokeColor": "#868e96",
+                "points": [[0, 0], [0, 0]],
+                "startBinding": {"elementId": parent_id},
+                "endBinding": {"elementId": node_id},
+                "startArrowhead": None, "endArrowhead": "arrow",
+            })
+
+        children = node.get("children", [])
+        if not children:
+            return x + w + 30
+
+        child_y = y + _MG_H + 60
+        child_x = x
+        for child in children:
+            child_x = _emit_mg(child, child_x, child_y, depth + 1, node_id)
+        return child_x
+
+    if root:
+        _emit_mg(root, 0, 0)
+
+    # ── Hub-spoke network ────────────────────────────────────────────────
+    network = design.get("network_design", {})
+    if network:
+        net_y = 350
+        hub = network.get("hub_vnet", {})
+        spokes = network.get("spoke_vnets", [])
+        on_prem = network.get("on_prem_connectivity", "VPN")
+
+        hub_name = hub.get("name", "Hub VNet")
+        hub_cidr = hub.get("cidr", "10.0.0.0/16")
+        hub_w, hub_h = 280, 160
+
+        elems.append({
+            "type": "rectangle", "id": "hub_vnet",
+            "x": 200, "y": net_y, "width": hub_w, "height": hub_h,
+            "strokeColor": _AZURE_COLORS["vnet_hub"]["border"],
+            "backgroundColor": _AZURE_COLORS["vnet_hub"]["bg"],
+            "fillStyle": "solid", "roundness": {"type": 3},
+            "label": {"text": f"{hub_name}\n{hub_cidr}", "fontSize": 14},
+        })
+
+        # Hub components
+        components = hub.get("components", [])
+        comp_x = 215
+        for i, comp_name in enumerate(components[:3]):
+            elems.append({
+                "type": "rectangle", "id": f"hub_comp_{i}",
+                "x": comp_x, "y": net_y + 80, "width": 120, "height": 35,
+                "strokeColor": _AZURE_COLORS.get("security" if "firewall" in comp_name.lower() else "networking", _AZURE_COLORS["networking"])["border"],
+                "backgroundColor": _AZURE_COLORS.get("security" if "firewall" in comp_name.lower() else "networking", _AZURE_COLORS["networking"])["bg"],
+                "fillStyle": "solid", "roundness": {"type": 3},
+                "label": {"text": comp_name, "fontSize": 11},
+            })
+            comp_x += 130
+
+        # On-premises
+        on_prem_x = 200 - 220
+        on_prem_y = net_y + hub_h // 2 - 30
+        elems.append({
+            "type": "rectangle", "id": "on_prem",
+            "x": on_prem_x, "y": on_prem_y, "width": _BOX_W, "height": _BOX_H,
+            "strokeColor": _AZURE_COLORS["on_premises"]["border"],
+            "backgroundColor": _AZURE_COLORS["on_premises"]["bg"],
+            "fillStyle": "solid", "roundness": {"type": 3},
+            "label": {"text": f"On-Premises\n{on_prem}", "fontSize": 14},
+        })
+        arrows.append({
+            "type": "arrow", "id": "on_prem_to_hub",
+            "x": 0, "y": 0, "width": 1, "height": 1,
+            "strokeColor": "#868e96", "strokeStyle": "dashed",
+            "points": [[0, 0], [0, 0]],
+            "startBinding": {"elementId": "on_prem"},
+            "endBinding": {"elementId": "hub_vnet"},
+            "startArrowhead": None, "endArrowhead": "arrow",
+            "label": {"text": on_prem},
+        })
+
+        # Spokes
+        spoke_x = 200 + hub_w + 80
+        spoke_start_y = net_y - 40
         spoke_gap = max(90, hub_h // max(len(spokes), 1))
 
         for i, spoke in enumerate(spokes):
@@ -1147,55 +1494,136 @@ def _render_hub_spoke(
             spoke_label = f"{spoke_name}\n{spoke_cidr}" if spoke_cidr else spoke_name
             spoke_y = spoke_start_y + i * spoke_gap
 
-            elems.extend(_az_rect(spoke_id, spoke_label, "vnet_spoke",
-                                  spoke_x, spoke_y, 200, 55, dashed=True))
-
-            # Peering arrow from hub to spoke
-            elems.extend(_az_arrow(
-                f"hub_to_{spoke_id}",
-                x + hub_w, y + hub_h // 2,
-                spoke_x, spoke_y + 27,
-                "peering",
-            ))
-
-    return elems
-
-
-def generate_landing_zone_elements(design: dict[str, Any]) -> dict[str, Any]:
-    """Build Excalidraw elements for the full landing zone architecture.
-
-    Layout: Management groups (top) → Hub-spoke network (bottom).
-    Returns {"elements_json": str, "element_count": int}.
-    """
-    elems: list[dict] = []
-
-    # Zone 1: Management group hierarchy
-    mg = design.get("management_groups", {})
-    root = mg.get("root", mg)
-    if root:
-        mg_elems, _ = _render_mgmt_group_tree(root, 0, 0)
-        elems.extend(mg_elems)
-
-    # Zone 2: Hub-spoke network (below management groups)
-    network = design.get("network_design", {})
-    if network:
-        network_y = 350  # below MG tree
-        hub_spoke_elems = _render_hub_spoke(network, 200, network_y)
-        elems.extend(hub_spoke_elems)
-
-    # Camera pseudo-element for auto-zoom
-    if elems:
-        all_x = [e.get("x", 0) for e in elems if "x" in e]
-        all_y = [e.get("y", 0) for e in elems if "y" in e]
-        if all_x and all_y:
-            elems.insert(0, {
-                "type": "cameraUpdate",
-                "x": min(all_x) - 50, "y": min(all_y) - 50,
-                "width": max(all_x) - min(all_x) + 400,
-                "height": max(all_y) - min(all_y) + 300,
+            elems.append({
+                "type": "rectangle", "id": spoke_id,
+                "x": spoke_x, "y": spoke_y, "width": 200, "height": 55,
+                "strokeColor": _AZURE_COLORS["vnet_spoke"]["border"],
+                "backgroundColor": _AZURE_COLORS["vnet_spoke"]["bg"],
+                "fillStyle": "solid", "roundness": {"type": 3},
+                "label": {"text": spoke_label, "fontSize": 12},
+            })
+            arrows.append({
+                "type": "arrow", "id": f"hub_to_{spoke_id}",
+                "x": 0, "y": 0, "width": 1, "height": 1,
+                "strokeColor": "#495057",
+                "points": [[0, 0], [0, 0]],
+                "startBinding": {"elementId": "hub_vnet"},
+                "endBinding": {"elementId": spoke_id},
+                "startArrowhead": None, "endArrowhead": "arrow",
+                "label": {"text": "peering"},
             })
 
+    # Add arrows after all shapes (progressive ordering)
+    elems.extend(arrows)
+
+    # ── Camera ───────────────────────────────────────────────────────────
+    if elems:
+        all_x = [e.get("x", 0) for e in elems if "x" in e and e.get("type") != "arrow"]
+        all_y = [e.get("y", 0) for e in elems if "y" in e and e.get("type") != "arrow"]
+        if all_x and all_y:
+            cam_x = min(all_x) - 100
+            cam_y = min(all_y) - 80
+            cam_w = max(all_x) + 400 - cam_x
+            cam_h = max(all_y) + 300 - cam_y
+            if cam_w / max(cam_h, 1) > 4 / 3:
+                cam_h = int(cam_w * 3 / 4)
+            else:
+                cam_w = int(cam_h * 4 / 3)
+            elems.insert(0, {"type": "cameraUpdate", "x": cam_x, "y": cam_y,
+                             "width": cam_w, "height": cam_h})
+
     return {"elements_json": json.dumps(elems), "element_count": len(elems)}
+
+
+# ── Async MCP client ────────────────────────────────────────────────────
+
+
+async def _render_mcp_async(
+    elements_json: str, mcp_url: str = EXCALIDRAW_MCP_URL,
+) -> dict[str, Any]:
+    """Connect to Excalidraw MCP server and invoke ``create_view``."""
+    try:
+        from mcp import ClientSession  # type: ignore[import-untyped]
+    except ImportError:
+        return {"success": False, "error": "mcp package not installed - run: pip install mcp"}
+
+    def _extract(result: Any) -> str:
+        if hasattr(result, "content"):
+            parts = []
+            for block in result.content:
+                parts.append(getattr(block, "text", str(block)))
+            return "\n".join(parts)
+        return str(result)
+
+    def _make_httpx_client(**kwargs: Any) -> Any:
+        """Custom httpx client factory - disables SSL verification when the
+        standard CA bundle fails (common behind corporate proxies)."""
+        import httpx  # type: ignore[import-untyped]
+        if os.environ.get("CAF_NO_SSL_VERIFY", "").lower() in ("1", "true"):
+            kwargs["verify"] = False
+            logger.debug("[MCP] SSL verify disabled via CAF_NO_SSL_VERIFY")
+        elif kwargs.get("verify", True) is not False:
+            try:
+                with httpx.Client(verify=True) as probe:
+                    probe.head(mcp_url, timeout=5)
+                logger.debug("[MCP] SSL probe OK - using default verification")
+            except Exception as exc:
+                kwargs["verify"] = False
+                logger.warning("[MCP] SSL probe failed (%s) - disabling verification. "
+                               "Set CAF_NO_SSL_VERIFY=1 to suppress this warning.", exc)
+        return httpx.AsyncClient(**kwargs)
+
+    errors: list[str] = []
+
+    # 1. Streamable HTTP (preferred)
+    try:
+        from mcp.client.streamable_http import streamablehttp_client
+        async with streamablehttp_client(
+            mcp_url, httpx_client_factory=_make_httpx_client,
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                res = await session.call_tool("create_view", {"elements": elements_json})
+                return {"success": True, "transport": "streamable-http",
+                        "result": _extract(res)}
+    except Exception as exc:
+        errors.append(f"streamable-http: {exc}")
+
+    # 2. SSE fallback
+    try:
+        from mcp.client.sse import sse_client
+        async with sse_client(mcp_url, httpx_client_factory=_make_httpx_client) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                res = await session.call_tool("create_view", {"elements": elements_json})
+                return {"success": True, "transport": "sse",
+                        "result": _extract(res)}
+    except Exception as exc:
+        errors.append(f"sse: {exc}")
+
+    return {"success": False, "error": " | ".join(errors)}
+
+
+def render_via_excalidraw_mcp(
+    elements_json: str, mcp_url: str = EXCALIDRAW_MCP_URL,
+) -> dict[str, Any]:
+    """Render landing zone diagram via Excalidraw MCP server (**sync wrapper**).
+
+    Handles both sync and async caller contexts gracefully.
+    """
+    import concurrent.futures
+
+    coro = _render_mcp_async(elements_json, mcp_url)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=30)
+    return asyncio.run(coro)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1206,6 +1634,7 @@ def export_landing_zone_png(
     design: dict[str, Any],
     filepath: str = "./output/architecture.png",
     scale: float = 2.0,
+    workloads: list[dict] | None = None,
 ) -> str:
     """Render the landing zone diagram as a PNG using Pillow.
 
@@ -1214,7 +1643,7 @@ def export_landing_zone_png(
     """
     from PIL import Image, ImageDraw, ImageFont
 
-    result = generate_landing_zone_elements(design)
+    result = generate_landing_zone_elements(design, workloads)
     raw_elems = json.loads(result["elements_json"])
     # Filter out pseudo-elements
     elems = [e for e in raw_elems if e.get("type") not in ("cameraUpdate",)]
@@ -1440,7 +1869,8 @@ async def run_full_pipeline(content: str) -> dict[str, Any]:
 
     # Step 4: Generate diagram
     run_id = uuid.uuid4().hex[:8]
-    lz_elements = generate_landing_zone_elements(design)
+    workloads = plan.get("workload_inventory", [])
+    lz_elements = generate_landing_zone_elements(design, workloads)
 
     excalidraw_path = save_excalidraw_file(
         lz_elements["elements_json"],
@@ -1449,6 +1879,7 @@ async def run_full_pipeline(content: str) -> dict[str, Any]:
     png_path = export_landing_zone_png(
         design,
         f"./output/architecture_{run_id}.png",
+        workloads=workloads,
     )
 
     excalidraw_file = None

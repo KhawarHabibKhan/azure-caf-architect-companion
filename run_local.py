@@ -34,15 +34,17 @@ from tools import (
     run_plan,
     design_landing_zone,
     generate_landing_zone_elements,
+    generate_mcp_landing_zone_elements,
     save_excalidraw_file,
     export_landing_zone_png,
+    render_via_excalidraw_mcp,
     build_caf_report,
 )
 
 console = Console()
 
 
-async def run_review(content: str) -> None:
+async def run_review(content: str, render_mcp: bool = False) -> None:
     console.rule("[bold blue]Azure CAF Architect Companion[/bold blue]")
 
     # Step 1: Parse Input
@@ -155,7 +157,7 @@ async def run_review(content: str) -> None:
     # Step 5: Generate Diagram
     console.print()
     console.print("[dim]Step 5:[/dim] Generating architecture diagram...")
-    lz_elements = generate_landing_zone_elements(design)
+    lz_elements = generate_landing_zone_elements(design, plan.get("workload_inventory", []))
 
     import uuid
     run_id = uuid.uuid4().hex[:8]
@@ -167,20 +169,35 @@ async def run_review(content: str) -> None:
     png_path = export_landing_zone_png(
         design,
         f"./output/architecture_{run_id}.png",
+        workloads=plan.get("workload_inventory", []),
     )
     console.print(f"  Excalidraw: {excalidraw_path}")
     console.print(f"  PNG: {png_path}")
     console.print(f"  Elements: {lz_elements['element_count']}")
 
-    # Step 6: Build Report
-    console.print()
-    console.print("[dim]Step 6:[/dim] Building final report...")
     diagram_info = {
         "element_count": lz_elements["element_count"],
         "local_file": excalidraw_path,
         "png_file": png_path,
         "run_id": run_id,
     }
+
+    # Step 5b: Render via Excalidraw MCP (optional)
+    if render_mcp:
+        console.print("  [dim]\u21b3 Rendering via Excalidraw MCP server...[/dim]")
+        mcp_elems = generate_mcp_landing_zone_elements(design)
+        mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
+        diagram_info["mcp_render"] = mcp_result
+        if mcp_result.get("success"):
+            console.print(
+                f"  [green]\u2713 MCP:[/green]       Success via {mcp_result.get('transport', 'unknown')}"
+            )
+        else:
+            console.print(f"  [red]\u2717 MCP:[/red]       {mcp_result.get('error', 'unknown')}")
+
+    # Step 6: Build Report
+    console.print()
+    console.print("[dim]Step 6:[/dim] Building final report...")
     report = build_caf_report(caf_input, assessment, plan, design, diagram_info)
 
     # Save report bundle
@@ -211,6 +228,8 @@ def main():
     parser = argparse.ArgumentParser(description="Azure CAF Architect Companion - CLI")
     parser.add_argument("file", nargs="?", help="Path to infrastructure description file")
     parser.add_argument("--text", "-t", help="Inline infrastructure description")
+    parser.add_argument("--render", "-r", action="store_true",
+                        help="Render diagram via Excalidraw MCP server")
     args = parser.parse_args()
 
     if args.text:
@@ -222,7 +241,7 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    asyncio.run(run_review(content))
+    asyncio.run(run_review(content, render_mcp=args.render))
 
 
 if __name__ == "__main__":
