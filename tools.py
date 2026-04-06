@@ -1549,17 +1549,54 @@ def export_landing_zone_png(
     filepath: str = "./output/architecture.png",
     scale: float = 2.0,
     workloads: list[dict] | None = None,
+    excalidraw_path: str | None = None,
 ) -> str:
-    """Render the landing zone diagram as a PNG using Pillow.
+    """Export the landing zone diagram as a PNG image.
 
-    Uses the same layout as the Excalidraw renderer.
+    Uses the Node.js Excalidraw-native renderer (scripts/export-png.mjs)
+    which supports icons and full fidelity rendering. Falls back to a
+    basic Pillow renderer if Node.js is not available.
+
+    Args:
+        design: Landing zone design dict (used only for Pillow fallback).
+        filepath: Output PNG path.
+        scale: Resolution multiplier.
+        workloads: Workload list (used only for Pillow fallback).
+        excalidraw_path: Path to the saved .excalidraw file (preferred).
+
     Returns absolute path to the saved PNG.
     """
+    import subprocess
+
+    # ── Primary: Node.js Excalidraw renderer ─────────────────────────────
+    if excalidraw_path and os.path.exists(excalidraw_path):
+        script = os.path.join(os.path.dirname(__file__), "scripts", "export-png.mjs")
+        if os.path.exists(script):
+            try:
+                result = subprocess.run(
+                    ["node", script, excalidraw_path, filepath, "--scale", str(scale)],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=os.path.dirname(__file__),
+                )
+                if result.returncode == 0:
+                    try:
+                        info = json.loads(result.stdout.strip())
+                        if info.get("success"):
+                            logger.debug("[PNG] Exported via Node.js: %sx%s",
+                                         info.get("width"), info.get("height"))
+                            return info.get("path", os.path.abspath(filepath))
+                    except json.JSONDecodeError:
+                        pass
+                logger.warning("[PNG] Node.js export failed: %s", result.stderr[:200])
+            except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+                logger.warning("[PNG] Node.js not available: %s", exc)
+
+    # ── Fallback: Pillow basic renderer (no icons) ───────────────────────
+    logger.debug("[PNG] Using Pillow fallback")
     from PIL import Image, ImageDraw, ImageFont
 
-    result = generate_landing_zone_elements(design, workloads)
-    raw_elems = json.loads(result["elements_json"])
-    # Filter out pseudo-elements
+    elements_result = generate_landing_zone_elements(design, workloads)
+    raw_elems = json.loads(elements_result["elements_json"])
     elems = [e for e in raw_elems if e.get("type") not in ("cameraUpdate",)]
 
     if not elems:
@@ -1570,30 +1607,20 @@ def export_landing_zone_png(
         img.save(filepath, "PNG")
         return os.path.abspath(filepath)
 
-    # Canvas bounds
     all_x = [e.get("x", 0) for e in elems if "x" in e]
     all_y = [e.get("y", 0) for e in elems if "y" in e]
     all_w = [e.get("x", 0) + e.get("width", 0) for e in elems if "width" in e]
     all_h = [e.get("y", 0) + e.get("height", 0) for e in elems if "height" in e]
-
     pad = 80
-    min_x = min(all_x) - pad
-    min_y = min(all_y) - pad
-    max_x = max(all_w + all_x) + pad
-    max_y = max(all_h + all_y) + pad
-
-    cw = int((max_x - min_x) * scale)
-    ch = int((max_y - min_y) * scale)
+    min_x, min_y = min(all_x) - pad, min(all_y) - pad
+    max_x, max_y = max(all_w + all_x) + pad, max(all_h + all_y) + pad
+    cw, ch = int((max_x - min_x) * scale), int((max_y - min_y) * scale)
     img = Image.new("RGB", (max(cw, 100), max(ch, 100)), "#ffffff")
     draw = ImageDraw.Draw(img)
 
-    def sx(v: float) -> float:
-        return (v - min_x) * scale
+    def sx(v: float) -> float: return (v - min_x) * scale
+    def sy(v: float) -> float: return (v - min_y) * scale
 
-    def sy(v: float) -> float:
-        return (v - min_y) * scale
-
-    # Load fonts
     try:
         font = ImageFont.truetype("arial.ttf", int(14 * scale))
         font_sm = ImageFont.truetype("arial.ttf", int(11 * scale))
@@ -1605,32 +1632,24 @@ def export_landing_zone_png(
             font = ImageFont.load_default()
             font_sm = font
 
-    # Draw elements
     for elem in elems:
         etype = elem.get("type", "")
-
         if etype == "rectangle":
-            x0 = sx(elem["x"])
-            y0 = sy(elem["y"])
+            x0, y0 = sx(elem["x"]), sy(elem["y"])
             x1 = sx(elem["x"] + elem.get("width", _BOX_W))
             y1 = sy(elem["y"] + elem.get("height", _BOX_H))
-            bg = elem.get("backgroundColor", "#e7f5ff")
-            border = elem.get("strokeColor", "#1c7ed6")
             draw.rounded_rectangle([x0, y0, x1, y1], radius=8 * scale,
-                                   fill=bg, outline=border, width=int(2 * scale))
-
+                                   fill=elem.get("backgroundColor", "#e7f5ff"),
+                                   outline=elem.get("strokeColor", "#1c7ed6"),
+                                   width=int(2 * scale))
         elif etype == "text":
-            tx = sx(elem["x"])
-            ty = sy(elem["y"])
-            text = elem.get("text", "")
-            color = elem.get("strokeColor", "#1e1e1e")
             f = font_sm if elem.get("fontSize", 14) < 13 else font
-            draw.text((tx, ty), text, fill=color, font=f)
-
+            draw.text((sx(elem["x"]), sy(elem["y"])),
+                      elem.get("text", ""),
+                      fill=elem.get("strokeColor", "#1e1e1e"), font=f)
         elif etype == "arrow":
             points = elem.get("points", [[0, 0], [0, 0]])
-            ax = sx(elem["x"])
-            ay = sy(elem["y"])
+            ax, ay = sx(elem["x"]), sy(elem["y"])
             for j in range(len(points) - 1):
                 px0 = ax + points[j][0] * scale
                 py0 = ay + points[j][1] * scale
@@ -1639,20 +1658,12 @@ def export_landing_zone_png(
                 draw.line([(px0, py0), (px1, py1)],
                           fill=elem.get("strokeColor", "#495057"),
                           width=int(2 * scale))
-                # Arrowhead
                 angle = math.atan2(py1 - py0, px1 - px0)
-                arrow_len = 10 * scale
-                draw.polygon([
-                    (px1, py1),
-                    (px1 - arrow_len * math.cos(angle - 0.4),
-                     py1 - arrow_len * math.sin(angle - 0.4)),
-                    (px1 - arrow_len * math.cos(angle + 0.4),
-                     py1 - arrow_len * math.sin(angle + 0.4)),
-                ], fill=elem.get("strokeColor", "#495057"))
-
-    # Watermark
-    draw.text((sx(min_x + pad), sy(max_y - pad + 40)),
-              "Azure CAF Architect Companion", fill="#c0c0c0", font=font_sm)
+                al = 10 * scale
+                draw.polygon([(px1, py1),
+                              (px1 - al * math.cos(angle - 0.4), py1 - al * math.sin(angle - 0.4)),
+                              (px1 - al * math.cos(angle + 0.4), py1 - al * math.sin(angle + 0.4))],
+                             fill=elem.get("strokeColor", "#495057"))
 
     os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
     img.save(filepath, "PNG")
@@ -1911,6 +1922,7 @@ async def run_full_pipeline(content: str) -> dict[str, Any]:
         design,
         f"./output/architecture_{run_id}.png",
         workloads=workloads,
+        excalidraw_path=excalidraw_path,
     )
 
     excalidraw_file = None

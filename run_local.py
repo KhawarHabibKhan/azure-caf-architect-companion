@@ -176,6 +176,7 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
         design,
         f"./output/architecture_{run_id}.png",
         workloads=plan.get("workload_inventory", []),
+        excalidraw_path=excalidraw_path,
     )
     console.print(f"  Excalidraw: {excalidraw_path}")
     console.print(f"  PNG: {png_path}")

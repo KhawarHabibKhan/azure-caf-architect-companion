@@ -208,7 +208,7 @@ async def review_stream(req: ReviewRequest):
             lz_elements = generate_landing_zone_elements(design, plan_result.get("workload_inventory", []))
             lz_elements["elements_json"] = await refine_diagram_layout(lz_elements["elements_json"])
             excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
-            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png", workloads=plan_result.get("workload_inventory", []))
+            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png", workloads=plan_result.get("workload_inventory", []), excalidraw_path=excalidraw_path)
             excalidraw_file = None
             try:
                 with open(excalidraw_path, "r", encoding="utf-8") as ef:
