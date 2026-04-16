@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchPngBlobUrl, pngDownloadUrl, excalidrawDownloadUrl, downloadFile } from "../api";
+import { excalidrawDownloadUrl, downloadFile } from "../api";
 
 export default function DiagramViewer({ excalidrawFile, runId }) {
   const [pngBlobUrl, setPngBlobUrl] = useState(null);
@@ -7,11 +7,26 @@ export default function DiagramViewer({ excalidrawFile, runId }) {
   const [ExcalidrawComp, setExcalidrawComp] = useState(null);
   const [excalidrawAPI, setExcalidrawAPI] = useState(null);
 
+  // Render PNG client-side so Azure icons are always included
   useEffect(() => {
-    if (runId) {
-      fetchPngBlobUrl(runId).then(setPngBlobUrl);
-    }
-  }, [runId]);
+    if (!excalidrawFile?.elements?.length) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { exportToBlob } = await import("@excalidraw/utils");
+        const blob = await exportToBlob({
+          elements: excalidrawFile.elements,
+          appState: { viewBackgroundColor: "#ffffff", exportBackground: true },
+          files: excalidrawFile.files || {},
+          mimeType: "image/png",
+        });
+        if (!cancelled) setPngBlobUrl(URL.createObjectURL(blob));
+      } catch (err) {
+        console.error("Client-side PNG render failed:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [excalidrawFile]);
 
   // Scroll all elements into view once the API is ready
   useEffect(() => {
@@ -41,15 +56,15 @@ export default function DiagramViewer({ excalidrawFile, runId }) {
     <div className="card">
       <h3>Landing Zone Architecture</h3>
       <div className="btn-row" style={{ marginBottom: 12 }}>
+        {pngBlobUrl && (
+          <button className="btn btn-secondary" onClick={() => downloadFile(pngBlobUrl, `caf_architecture_${runId || "diagram"}.png`)}>
+            Download PNG
+          </button>
+        )}
         {runId && (
-          <>
-            <button className="btn btn-secondary" onClick={() => downloadFile(pngDownloadUrl(runId), `caf_architecture_${runId}.png`)}>
-              Download PNG
-            </button>
-            <button className="btn btn-secondary" onClick={() => downloadFile(excalidrawDownloadUrl(runId), `caf_architecture_${runId}.excalidraw`)}>
-              Download Excalidraw
-            </button>
-          </>
+          <button className="btn btn-secondary" onClick={() => downloadFile(excalidrawDownloadUrl(runId), `caf_architecture_${runId}.excalidraw`)}>
+            Download Excalidraw
+          </button>
         )}
         {excalidrawFile && (
           <button className="btn btn-secondary" onClick={() => showInteractive ? setShowInteractive(false) : loadExcalidraw()}>

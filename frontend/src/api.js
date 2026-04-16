@@ -20,19 +20,8 @@ export async function assessOnly(content) {
   return res.json();
 }
 
-export function pngDownloadUrl(runId) {
-  return `${BASE}/download/png/${runId}`;
-}
-
 export function excalidrawDownloadUrl(runId) {
   return `${BASE}/download/excalidraw/${runId}`;
-}
-
-export async function fetchPngBlobUrl(runId) {
-  const res = await fetch(pngDownloadUrl(runId));
-  if (!res.ok) return null;
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
 }
 
 export function downloadFile(url, filename) {
