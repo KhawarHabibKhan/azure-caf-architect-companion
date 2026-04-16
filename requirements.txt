@@ -1,6 +1,6 @@
-# Microsoft Agent Framework
-agent-framework --pre
-agent-framework-azure-ai --pre
+# Microsoft Agent Framework (GA)
+agent-framework-core
+agent-framework-openai
 
 # Azure Identity (authentication)
 azure-identity>=1.25.0
