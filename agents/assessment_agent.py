@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 
 from agent_framework import Agent
-from agent_framework.openai import OpenAIChatClient
+from agent_framework.azure import AzureOpenAIChatClient
 
 from tools.assessment import (
     assess_readiness,
@@ -58,8 +58,8 @@ RULES
 - Return ONLY valid JSON. No code fences, no commentary."""
 
 
-def _build_chat_client() -> OpenAIChatClient:
-    """Construct the GA OpenAIChatClient from environment variables."""
+def _build_chat_client() -> AzureOpenAIChatClient:
+    """Construct the GA AzureOpenAIChatClient from environment variables (key auth)."""
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
     deployment = (
         os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
@@ -68,18 +68,15 @@ def _build_chat_client() -> OpenAIChatClient:
     )
     api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
 
-    if api_key:
-        return OpenAIChatClient(
-            azure_endpoint=endpoint,
-            model=deployment,
-            api_key=api_key,
-        )
+    if not endpoint:
+        raise RuntimeError("AZURE_OPENAI_ENDPOINT must be set")
+    if not api_key:
+        raise RuntimeError("AZURE_OPENAI_API_KEY must be set")
 
-    from azure.identity import DefaultAzureCredential
-    return OpenAIChatClient(
-        azure_endpoint=endpoint,
-        model=deployment,
-        credential=DefaultAzureCredential(),
+    return AzureOpenAIChatClient(
+        endpoint=endpoint,
+        deployment_name=deployment,
+        api_key=api_key,
     )
 
 

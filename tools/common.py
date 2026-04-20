@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_framework import Message
-from agent_framework.openai import OpenAIChatClient
+from agent_framework.azure import AzureOpenAIChatClient
 
 logger = logging.getLogger("caf-companion")
 
@@ -36,19 +36,15 @@ async def _llm_call(system_prompt: str, user_content: str) -> dict[str, Any]:
         return {"error": "AZURE_OPENAI_ENDPOINT not set"}
 
     api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    if api_key:
-        client = OpenAIChatClient(
-            azure_endpoint=endpoint,
-            model=deployment,
-            api_key=api_key,
-        )
-    else:
-        from azure.identity import DefaultAzureCredential
-        client = OpenAIChatClient(
-            azure_endpoint=endpoint,
-            model=deployment,
-            credential=DefaultAzureCredential(),
-        )
+    if not api_key:
+        logger.debug("[LLM] AZURE_OPENAI_API_KEY not set")
+        return {"error": "AZURE_OPENAI_API_KEY not set"}
+
+    client = AzureOpenAIChatClient(
+        endpoint=endpoint,
+        deployment_name=deployment,
+        api_key=api_key,
+    )
 
     response = await client.get_response(
         messages=[
