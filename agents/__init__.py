@@ -6,5 +6,6 @@ tools. The orchestrator chains them linearly.
 """
 
 from agents.assessment_agent import create_assessment_agent
+from agents.plan_agent import create_plan_agent
 
-__all__ = ["create_assessment_agent"]
+__all__ = ["create_assessment_agent", "create_plan_agent"]
