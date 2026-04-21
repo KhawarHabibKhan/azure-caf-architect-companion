@@ -34,7 +34,7 @@ from tools.planning import (
 
 PLAN_AGENT_INSTRUCTIONS = """You are the Plan Agent for the Microsoft Cloud Adoption Framework (CAF) pipeline.
 
-Your input is the JSON payload produced by the Assessment Agent. It contains a `caf_input` field (the structured organization description) plus readiness, operating-model, and skills results. Use `caf_input` as the source of truth for organization details, and drive the registered tools in the exact order below to produce a cloud adoption plan.
+You are running as the second participant in a sequential workflow. The previous assistant message in the conversation is a JSON object produced by the Assessment Agent. Parse that JSON — it contains a `caf_input` field (the structured organization description) plus readiness, operating-model, and skills results. Use `caf_input` as the source of truth for organization details, and drive the registered tools in the exact order below to produce a cloud adoption plan.
 
 TOOL EXECUTION ORDER
 1. Call `classify_workloads(caf_input=<caf_input dict>)` to tag every application with one of the 7 R's (retire, rehost, refactor, rearchitect, replace, rebuild, retain) and target Azure services. Keep the returned list — it is `<classified>`.

@@ -36,10 +36,9 @@ from tools.design import (
 
 DESIGN_AGENT_INSTRUCTIONS = """You are the Design Agent for the Microsoft Cloud Adoption Framework (CAF) pipeline.
 
-Your input is a JSON payload with three top-level fields:
-  - `caf_input`:  the structured organization description produced by the Assessment Agent.
-  - `assessment`: the full output of the Assessment Agent (readiness, operating model, skills, etc.).
-  - `plan`:       the full output of the Plan Agent (workload_inventory, migration_waves, cost_estimation, risk_register, governance_recommendations).
+You are running as the third participant in a sequential workflow. Two prior assistant messages exist in the conversation history:
+  - The FIRST prior assistant message is JSON produced by the Assessment Agent. Parse it and treat it as `<assessment>`. Its `caf_input` field is `<caf_input>`.
+  - The SECOND prior assistant message is JSON produced by the Plan Agent. Parse it and treat it as `<plan>`.
 
 Your job: design the Azure landing zone, render the architecture diagram, and produce the final CAF report by invoking the registered tools in the exact order below.
 
