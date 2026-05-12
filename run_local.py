@@ -1,9 +1,15 @@
 """
 Azure CAF Architect Companion - Local CLI Runner
 ==================================================
+Drives the full 3-agent SequentialBuilder workflow via `stream_pipeline()`
+from `agents`. Prints per-agent progress as each agent finishes, then
+renders the familiar rich tables (readiness, workloads, waves, costs,
+risks, executive summary) from the streamed event data.
+
 Usage:
     python run_local.py scenarios/meditrack_healthcare.txt
     python run_local.py --text "Company: Acme Corp, 50 employees..."
+    python run_local.py scenarios/meditrack_healthcare.txt --render
 """
 
 import argparse
@@ -28,45 +34,33 @@ from rich.panel import Panel
 
 logging.getLogger("caf-companion").setLevel(logging.CRITICAL)
 
-from tools import (
-    parse_caf_input,
-    run_assessment,
-    run_plan,
-    design_landing_zone,
-    generate_landing_zone_elements,
+from agents import stream_pipeline
+from tools.design import (
     generate_mcp_landing_zone_elements,
-    refine_diagram_layout,
-    save_excalidraw_file,
-    export_landing_zone_png,
     render_via_excalidraw_mcp,
-    build_caf_report,
 )
 
 console = Console()
 
 
-async def run_review(content: str, render_mcp: bool = False) -> None:
-    console.rule("[bold blue]Azure CAF Architect Companion[/bold blue]")
+AGENT_LABELS = {
+    "assessment": ("1/3", "Assessment Agent"),
+    "plan":       ("2/3", "Plan Agent"),
+    "design":     ("3/3", "Design Agent"),
+}
 
-    # Step 1: Parse Input
-    console.print()
-    console.print("[dim]Step 1:[/dim] Parsing infrastructure description...")
-    caf_input = await parse_caf_input(content)
+
+def _render_assessment(data: dict) -> None:
+    caf_input = data.get("caf_input", {})
     console.print(f"  Company: [bold]{caf_input.get('company_name', 'Unknown')}[/bold]")
     console.print(f"  Industry: {caf_input.get('industry', 'Unknown')}")
     console.print(f"  Applications: {len(caf_input.get('applications', []))}")
     console.print(f"  Team members: {sum(m.get('count', 0) for m in caf_input.get('team', []))}")
     console.print(f"  Compliance: {', '.join(caf_input.get('compliance_requirements', [])) or 'None'}")
+    console.print(f"  Overall readiness: [bold]{data.get('overall_readiness', '')}[/bold]")
+    console.print(f"  Operating model: [bold]{data.get('operating_model', {}).get('recommended', '')}[/bold]")
 
-    # Step 2: Assessment
-    console.print()
-    console.print("[dim]Step 2:[/dim] Running readiness assessment...")
-    assessment = await run_assessment(caf_input)
-    console.print(f"  Overall readiness: [bold]{assessment.get('overall_readiness', '')}[/bold]")
-    console.print(f"  Operating model: [bold]{assessment.get('operating_model', {}).get('recommended', '')}[/bold]")
-
-    # Skills table
-    skills = assessment.get("skills_assessment", [])
+    skills = data.get("skills_assessment", [])
     if skills:
         t = Table(title="Skills Assessment")
         t.add_column("Role")
@@ -74,16 +68,17 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
         t.add_column("Training")
         t.add_column("Priority")
         for s in skills:
-            t.add_row(s.get("role", ""), s.get("gap", "")[:50], s.get("recommended_training", ""), s.get("priority", ""))
+            t.add_row(
+                s.get("role", ""),
+                s.get("gap", "")[:50],
+                s.get("recommended_training", ""),
+                s.get("priority", ""),
+            )
         console.print(t)
 
-    # Step 3: Plan & Analyze
-    console.print()
-    console.print("[dim]Step 3:[/dim] Classifying workloads and planning migration...")
-    plan = await run_plan(caf_input, assessment)
 
-    # Workload classification table
-    workloads = plan.get("workload_inventory", [])
+def _render_plan(data: dict) -> None:
+    workloads = data.get("workload_inventory", [])
     if workloads:
         t = Table(title="Workload Classification (7 R's)")
         t.add_column("Workload")
@@ -100,8 +95,7 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
             )
         console.print(t)
 
-    # Wave plan
-    waves = plan.get("migration_waves", [])
+    waves = data.get("migration_waves", [])
     if waves:
         t = Table(title="Migration Wave Plan")
         t.add_column("Wave")
@@ -115,8 +109,7 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
             )
         console.print(t)
 
-    # Cost estimation
-    costs = plan.get("cost_estimation", {})
+    costs = data.get("cost_estimation", {})
     if costs:
         console.print(Panel(
             f"Monthly cost: [bold]${costs.get('total_monthly', 0):,.2f}[/bold]\n"
@@ -124,8 +117,7 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
             title="Cost Estimation",
         ))
 
-    # Risk register
-    risks = plan.get("risk_register", [])
+    risks = data.get("risk_register", [])
     if risks:
         t = Table(title="Risk Register")
         t.add_column("ID")
@@ -143,77 +135,24 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
             )
         console.print(t)
 
-    # Step 4: Design Landing Zone
-    console.print()
-    console.print("[dim]Step 4:[/dim] Designing Azure landing zone...")
-    design = await design_landing_zone(caf_input, plan)
 
-    network = design.get("network_design", {})
+def _render_design(data: dict) -> None:
+    landing_zone = data.get("landing_zone", {})
+    network = landing_zone.get("network_design", {})
     if network:
         console.print(f"  Topology: {network.get('topology', '')}")
         console.print(f"  Hub: {network.get('hub_vnet', {}).get('name', '')}")
         console.print(f"  Spokes: {len(network.get('spoke_vnets', []))}")
         console.print(f"  On-prem: {network.get('on_prem_connectivity', '')}")
 
-    # Step 5: Generate Diagram
-    console.print()
-    console.print("[dim]Step 5:[/dim] Generating architecture diagram...")
-    lz_elements = generate_landing_zone_elements(design, plan.get("workload_inventory", []))
+    diagram = data.get("diagram", {})
+    if diagram:
+        console.print(f"  Excalidraw: {diagram.get('local_file', '')}")
+        console.print(f"  PNG: {diagram.get('png_file', '')}")
+        console.print(f"  Elements: {diagram.get('element_count', 0)}")
 
-    # Step 5a: Diagram QA — LLM reviews and fixes layout
-    console.print("  [dim]\u21b3 Running diagram QA agent...[/dim]")
-    lz_elements["elements_json"] = await refine_diagram_layout(lz_elements["elements_json"])
-    console.print("  [green]\u2713 Layout refined[/green]")
 
-    import uuid
-    run_id = uuid.uuid4().hex[:8]
-
-    excalidraw_path = save_excalidraw_file(
-        lz_elements["elements_json"],
-        f"./output/architecture_{run_id}.excalidraw",
-    )
-    png_path = export_landing_zone_png(
-        design,
-        f"./output/architecture_{run_id}.png",
-        workloads=plan.get("workload_inventory", []),
-        excalidraw_path=excalidraw_path,
-    )
-    console.print(f"  Excalidraw: {excalidraw_path}")
-    console.print(f"  PNG: {png_path}")
-    console.print(f"  Elements: {lz_elements['element_count']}")
-
-    diagram_info = {
-        "element_count": lz_elements["element_count"],
-        "local_file": excalidraw_path,
-        "png_file": png_path,
-        "run_id": run_id,
-    }
-
-    # Step 5b: Render via Excalidraw MCP (optional)
-    if render_mcp:
-        console.print("  [dim]\u21b3 Rendering via Excalidraw MCP server...[/dim]")
-        mcp_elems = generate_mcp_landing_zone_elements(design)
-        mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
-        diagram_info["mcp_render"] = mcp_result
-        if mcp_result.get("success"):
-            console.print(
-                f"  [green]\u2713 MCP:[/green]       Success via {mcp_result.get('transport', 'unknown')}"
-            )
-        else:
-            console.print(f"  [red]\u2717 MCP:[/red]       {mcp_result.get('error', 'unknown')}")
-
-    # Step 6: Build Report
-    console.print()
-    console.print("[dim]Step 6:[/dim] Building final report...")
-    report = build_caf_report(caf_input, assessment, plan, design, diagram_info)
-
-    # Save report bundle
-    bundle_path = "./output/caf_report_bundle.json"
-    os.makedirs("./output", exist_ok=True)
-    with open(bundle_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, default=str)
-
-    # Executive summary
+def _render_executive_summary(report: dict) -> None:
     es = report.get("executive_summary", {})
     console.print()
     console.print(Panel(
@@ -226,6 +165,68 @@ async def run_review(content: str, render_mcp: bool = False) -> None:
         title="Executive Summary",
     ))
 
+
+async def run_review(content: str, render_mcp: bool = False) -> None:
+    console.rule("[bold blue]Azure CAF Architect Companion[/bold blue]")
+    console.print()
+
+    final_report: dict | None = None
+
+    async for event in stream_pipeline(content):
+        agent_key = event["agent"]
+        status = event["status"]
+
+        if agent_key == "complete":
+            if status == "error":
+                console.print(f"[red]Pipeline error:[/red] {event.get('error', 'unknown')}")
+                return
+            final_report = event["data"]
+            continue
+
+        label = AGENT_LABELS.get(agent_key, ("?/3", agent_key.title()))
+        step, name = label
+
+        if status == "running":
+            console.print(f"[dim]Step {step}:[/dim] {name} running...")
+        elif status == "done":
+            console.print(f"  [green]\u2713 {name} done[/green]")
+            data = event.get("data") or {}
+            if agent_key == "assessment":
+                _render_assessment(data)
+            elif agent_key == "plan":
+                _render_plan(data)
+            elif agent_key == "design":
+                _render_design(data)
+            console.print()
+        elif status == "error":
+            console.print(f"[red]\u2717 {name} failed:[/red] {event.get('error', 'unknown')}")
+            return
+
+    if final_report is None:
+        console.print("[red]Pipeline finished without a final report[/red]")
+        return
+
+    # Optional MCP rendering pass over the landing-zone design
+    if render_mcp and final_report.get("landing_zone"):
+        console.print("[dim]\u21b3 Rendering via Excalidraw MCP server...[/dim]")
+        mcp_elems = generate_mcp_landing_zone_elements(final_report["landing_zone"])
+        mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
+        diagram = final_report.setdefault("diagram", {})
+        diagram["mcp_render"] = mcp_result
+        if mcp_result.get("success"):
+            console.print(
+                f"  [green]\u2713 MCP:[/green]       Success via {mcp_result.get('transport', 'unknown')}"
+            )
+        else:
+            console.print(f"  [red]\u2717 MCP:[/red]       {mcp_result.get('error', 'unknown')}")
+
+    # Save report bundle
+    bundle_path = "./output/caf_report_bundle.json"
+    os.makedirs("./output", exist_ok=True)
+    with open(bundle_path, "w", encoding="utf-8") as f:
+        json.dump(final_report, f, indent=2, default=str)
+
+    _render_executive_summary(final_report)
     console.print()
     console.print(f"[green]Report saved to {bundle_path}[/green]")
     console.rule("[bold blue]Done[/bold blue]")

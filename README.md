@@ -44,9 +44,7 @@ git clone https://github.com/KhawarHabibKhan/azure-caf-architect-companion.git
 cd azure-caf-architect-companion
 
 # Python dependencies
-pip install agent-framework --pre
-pip install agent-framework-azure-ai --pre
-pip install fastapi uvicorn python-dotenv httpx pyyaml rich Pillow python-multipart
+pip install -r requirements.txt
 
 # Configure
 cp .env.template .env
