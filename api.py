@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import re
-import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,19 +21,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agents import run_pipeline, stream_pipeline
 from tools import (
     parse_caf_input,
     run_assessment,
     run_plan,
-    design_landing_zone,
-    generate_landing_zone_elements,
-    generate_mcp_landing_zone_elements,
-    refine_diagram_layout,
-    save_excalidraw_file,
-    export_landing_zone_png,
-    render_via_excalidraw_mcp,
-    build_caf_report,
-    run_full_pipeline,
 )
 
 # ---------------------------------------------------------------------------
@@ -121,14 +112,14 @@ async def list_scenarios():
 
 @app.post("/api/review")
 async def review(req: ReviewRequest):
-    """Run the full 3-agent CAF pipeline."""
+    """Run the full 3-agent CAF pipeline via the SequentialBuilder workflow."""
     if len(req.content) > MAX_INPUT_SIZE:
         raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
     if not req.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty")
 
     try:
-        report = await run_full_pipeline(req.content)
+        report = await run_pipeline(req.content)
         return JSONResponse(content=report)
     except Exception as exc:
         logger.exception("Pipeline failed")
@@ -174,9 +165,23 @@ async def plan(req: ReviewRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# Map the 3 workflow agents to the 6 step keys the frontend renders.
+# Each agent's `running`/`done` event fans out to one or more step events so
+# the existing ProgressTracker UI keeps lighting up the same way.
+_AGENT_TO_STEPS: dict[str, tuple[str, ...]] = {
+    "assessment": ("parsing", "assessment"),
+    "plan":       ("planning",),
+    "design":     ("design", "diagram", "report"),
+}
+
+
 @app.post("/api/review/stream")
 async def review_stream(req: ReviewRequest):
-    """Stream the full CAF pipeline step by step as SSE events."""
+    """Stream the full CAF pipeline step by step as SSE events.
+
+    Drives the 3-agent SequentialBuilder workflow via `stream_pipeline()`
+    and maps each agent event to the frontend's 6-step progress contract.
+    """
     if len(req.content) > MAX_INPUT_SIZE:
         raise HTTPException(status_code=400, detail=f"Input exceeds {MAX_INPUT_SIZE} characters")
     if not req.content.strip():
@@ -187,48 +192,25 @@ async def review_stream(req: ReviewRequest):
             return f"data: {json.dumps(data)}\n\n"
 
         try:
-            yield evt({"step": "parsing", "status": "running"})
-            caf_input = await parse_caf_input(req.content)
-            yield evt({"step": "parsing", "status": "done"})
+            async for event in stream_pipeline(req.content):
+                agent = event["agent"]
+                status = event["status"]
 
-            yield evt({"step": "assessment", "status": "running"})
-            assessment = await run_assessment(caf_input)
-            yield evt({"step": "assessment", "status": "done"})
+                if agent == "complete":
+                    if status == "done":
+                        yield evt({"step": "complete", "status": "done", "data": event["data"]})
+                    else:
+                        yield evt({"step": "error", "status": "error",
+                                   "message": event.get("error", "Pipeline failed")})
+                    continue
 
-            yield evt({"step": "planning", "status": "running"})
-            plan_result = await run_plan(caf_input, assessment)
-            yield evt({"step": "planning", "status": "done"})
+                if status == "error":
+                    yield evt({"step": "error", "status": "error",
+                               "message": event.get("error", f"{agent} agent failed")})
+                    continue
 
-            yield evt({"step": "design", "status": "running"})
-            design = await design_landing_zone(caf_input, plan_result)
-            yield evt({"step": "design", "status": "done"})
-
-            yield evt({"step": "diagram", "status": "running"})
-            run_id = uuid.uuid4().hex[:8]
-            lz_elements = generate_landing_zone_elements(design, plan_result.get("workload_inventory", []))
-            lz_elements["elements_json"] = await refine_diagram_layout(lz_elements["elements_json"])
-            excalidraw_path = save_excalidraw_file(lz_elements["elements_json"], f"./output/architecture_{run_id}.excalidraw")
-            png_path = export_landing_zone_png(design, f"./output/architecture_{run_id}.png", workloads=plan_result.get("workload_inventory", []), excalidraw_path=excalidraw_path)
-            excalidraw_file = None
-            try:
-                with open(excalidraw_path, "r", encoding="utf-8") as ef:
-                    excalidraw_file = json.load(ef)
-            except Exception:
-                pass
-            diagram_info = {"run_id": run_id, "excalidraw_file": excalidraw_file, "png_file": png_path, "element_count": lz_elements["element_count"]}
-
-            # MCP rendering (optional, non-blocking)
-            try:
-                mcp_elems = generate_mcp_landing_zone_elements(design)
-                mcp_result = render_via_excalidraw_mcp(mcp_elems["elements_json"])
-                diagram_info["mcp_render"] = mcp_result
-            except Exception:
-                logger.debug("MCP rendering skipped")
-            yield evt({"step": "diagram", "status": "done"})
-
-            yield evt({"step": "report", "status": "running"})
-            report = build_caf_report(caf_input, assessment, plan_result, design, diagram_info)
-            yield evt({"step": "complete", "status": "done", "data": report})
+                for step in _AGENT_TO_STEPS.get(agent, ()):
+                    yield evt({"step": step, "status": status})
 
         except Exception as exc:
             logger.exception("Streaming pipeline failed")
